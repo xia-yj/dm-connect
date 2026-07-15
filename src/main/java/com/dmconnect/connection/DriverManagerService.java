@@ -1,6 +1,7 @@
 package com.dmconnect.connection;
 
 import com.dmconnect.database.dm.DmDatabaseAdapter;
+import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.model.DriverDescriptor;
 import com.dmconnect.persistence.AppPaths;
 import com.dmconnect.persistence.JsonStore;
@@ -27,6 +28,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class DriverManagerService implements AutoCloseable {
+    static final String BUILT_IN_MYSQL_DRIVER_ID = "builtin:mysql-connector-j";
     private static final TypeReference<List<DriverDescriptor>> DRIVER_LIST = new TypeReference<>() {
     };
     private final AppPaths paths;
@@ -39,8 +41,11 @@ public final class DriverManagerService implements AutoCloseable {
     }
 
     public synchronized List<DriverDescriptor> findAll() throws IOException {
-        if (!Files.exists(paths.driversFile())) return List.of();
-        List<DriverDescriptor> descriptors = new ArrayList<>(store.read(paths.driversFile(), DRIVER_LIST));
+        List<DriverDescriptor> descriptors = Files.exists(paths.driversFile())
+                ? new ArrayList<>(store.read(paths.driversFile(), DRIVER_LIST))
+                : new ArrayList<>();
+        descriptors.removeIf(driver -> driver.id().equals(BUILT_IN_MYSQL_DRIVER_ID));
+        descriptors.add(builtInMysqlDescriptor());
         descriptors.sort(Comparator.comparing(DriverDescriptor::importedAt).reversed());
         return List.copyOf(descriptors);
     }
@@ -50,15 +55,21 @@ public final class DriverManagerService implements AutoCloseable {
     }
 
     public synchronized DriverDescriptor importDriver(Path sourceJar) throws Exception {
+        return importDriver(sourceJar, new DmDatabaseAdapter());
+    }
+
+    public synchronized DriverDescriptor importDriver(Path sourceJar, DatabaseAdapter adapter) throws Exception {
         if (sourceJar == null || !Files.isRegularFile(sourceJar)) {
             throw new IllegalArgumentException("请选择有效的 JDBC JAR 文件");
         }
+        if (adapter == null) throw new IllegalArgumentException("未指定数据库类型");
         String sha256 = sha256(sourceJar);
         Optional<DriverDescriptor> existing = findAll().stream()
-                .filter(driver -> driver.sha256().equalsIgnoreCase(sha256)).findFirst();
+                .filter(driver -> driver.sha256().equalsIgnoreCase(sha256))
+                .filter(driver -> driver.driverClass().equals(adapter.driverClassName())).findFirst();
         if (existing.isPresent()) return existing.get();
 
-        DriverRuntime inspected = loadRuntime(sourceJar, DmDatabaseAdapter.DRIVER_CLASS);
+        DriverRuntime inspected = loadRuntime(sourceJar, adapter.driverClassName());
         String version;
         try {
             Driver driver = inspected.driver();
@@ -74,7 +85,7 @@ public final class DriverManagerService implements AutoCloseable {
                 sourceJar.getFileName().toString(),
                 target.toAbsolutePath().toString(),
                 sha256,
-                DmDatabaseAdapter.DRIVER_CLASS,
+                adapter.driverClassName(),
                 version,
                 Instant.now());
         List<DriverDescriptor> descriptors = new ArrayList<>(findAll());
@@ -89,6 +100,11 @@ public final class DriverManagerService implements AutoCloseable {
         synchronized (loaded) {
             runtime = loaded.get(descriptorId);
             if (runtime != null) return runtime.driver();
+            if (BUILT_IN_MYSQL_DRIVER_ID.equals(descriptorId)) {
+                runtime = new DriverRuntime(new com.mysql.cj.jdbc.Driver());
+                loaded.put(descriptorId, runtime);
+                return runtime.driver();
+            }
             DriverDescriptor descriptor = findById(descriptorId)
                     .orElseThrow(() -> new IllegalArgumentException("找不到指定的 JDBC 驱动"));
             Path jar = Path.of(descriptor.storedPath());
@@ -103,6 +119,24 @@ public final class DriverManagerService implements AutoCloseable {
         }
     }
 
+    private static DriverDescriptor builtInMysqlDescriptor() {
+        String version;
+        try {
+            com.mysql.cj.jdbc.Driver driver = new com.mysql.cj.jdbc.Driver();
+            version = driver.getMajorVersion() + "." + driver.getMinorVersion();
+        } catch (java.sql.SQLException ignored) {
+            version = "8.3";
+        }
+        return new DriverDescriptor(
+                BUILT_IN_MYSQL_DRIVER_ID,
+                "MySQL Connector/J（应用内置）",
+                "classpath:com.mysql.cj.jdbc.Driver",
+                "builtin:mysql-connector-j",
+                "com.mysql.cj.jdbc.Driver",
+                version,
+                Instant.MAX);
+    }
+
     private static DriverRuntime loadRuntime(Path jar, String driverClass) throws Exception {
         URLClassLoader classLoader = new URLClassLoader(
                 new URL[]{jar.toUri().toURL()}, ClassLoader.getPlatformClassLoader());
@@ -115,7 +149,7 @@ public final class DriverManagerService implements AutoCloseable {
             return new DriverRuntime(driver, classLoader);
         } catch (Exception | LinkageError exception) {
             classLoader.close();
-            throw new IllegalArgumentException("无法加载达梦 JDBC 驱动，请确认 JAR 与 Java 17 兼容", exception);
+            throw new IllegalArgumentException("无法加载 JDBC 驱动 " + driverClass + "，请确认 JAR 与 Java 17 兼容", exception);
         }
     }
 

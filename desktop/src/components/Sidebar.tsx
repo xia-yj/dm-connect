@@ -3,7 +3,8 @@ import {
   Layers3, ListFilter, Plus, RefreshCw, Search, Table2, Trash2, Unplug, View
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from "react";
-import type { ConnectionProfile, DatabaseObject, DatabaseObjectKind } from "../types";
+import type { ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType } from "../types";
+import { databaseTypeLabel } from "../database";
 import { Brand } from "./Brand";
 
 export const OBJECT_KINDS: { kind: DatabaseObjectKind; label: string; icon: typeof Table2 }[] = [
@@ -61,7 +62,7 @@ export function Sidebar(props: SidebarProps) {
   const [hiddenSchemas, setHiddenSchemas] = useState<Record<string, string[]>>(readHiddenSchemas);
   const active = props.profiles.find(profile => profile.id === props.selectedProfileId) ?? null;
   const needle = filter.trim().toLowerCase();
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; profileId: string; schema: string; object?: DatabaseObject; longRowEnabled?: boolean; loadingLongRow?: boolean; longRowStatusError?: boolean } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; profileId: string; databaseType: DatabaseType; schema: string; object?: DatabaseObject; longRowEnabled?: boolean; loadingLongRow?: boolean; longRowStatusError?: boolean } | null>(null);
   const schemaVisibilityRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
@@ -85,9 +86,10 @@ export function Sidebar(props: SidebarProps) {
   function openContextMenu(event: MouseEvent, profileId: string, schema: string, object?: DatabaseObject) {
     event.preventDefault();
     event.stopPropagation();
-    const menu = { x: event.clientX, y: event.clientY, profileId, schema, object, loadingLongRow: Boolean(object) };
+    const databaseType = props.profiles.find(profile => profile.id === profileId)?.databaseType ?? "dm";
+    const menu = { x: event.clientX, y: event.clientY, profileId, databaseType, schema, object, loadingLongRow: Boolean(object && databaseType === "dm") };
     setContextMenu(menu);
-    if (object) {
+    if (object && databaseType === "dm") {
       void props.onGetLongRowStatus(profileId, object).then(enabled => {
         setContextMenu(current => current && current.object === object ? { ...current, longRowEnabled: enabled, loadingLongRow: false } : current);
       }).catch(() => {
@@ -160,7 +162,7 @@ export function Sidebar(props: SidebarProps) {
               onDoubleClick={() => profile.connected ? props.onRefresh(profile) : props.onConnect(profile)}
             >
               <span className={`connection-icon${profile.connected ? " online" : ""}`}><Database size={16} /></span>
-              <span className="connection-copy"><strong>{profile.name}</strong><small>{profile.username}@{profile.host}:{profile.port}</small></span>
+              <span className="connection-copy"><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{profile.username}@{profile.host}:{profile.port}</small></span>
               <span className={`connection-dot${profile.connected ? " online" : ""}`} />
             </button>
 
@@ -199,14 +201,14 @@ export function Sidebar(props: SidebarProps) {
               </details>
               {needle ? <div className="table-filter-results">
                 <div className="table-filter-heading"><span>表筛选结果</span>{loadingTables ? <em>正在检索…</em> : <em>{tableResults.length} 个</em>}</div>
-                {tableResults.map(object => <button key={`${object.schema}.${object.name}`} onDoubleClick={() => props.onOpenObject(profile.id, object)} title="双击打开">
+                {tableResults.map(object => <button key={`${object.schema}.${object.name}`} onContextMenu={event => openContextMenu(event, profile.id, object.schema, object)} onDoubleClick={() => props.onOpenObject(profile.id, object)} title="右键编辑，双击打开">
                   <Table2 size={13} /><span>{object.name}</span><small>{object.schema}</small>
                 </button>)}
                 {!loadingTables && tableResults.length === 0 && <span className="tree-message">没有匹配的表</span>}
               </div> : visibleSchemas.map(schema => <details className="schema-node" key={schema}>
                 <summary><ChevronDown size={13} /><Layers3 size={14} /><span>{schema}</span></summary>
                 <div className="category-list">
-                  {OBJECT_KINDS.map(({ kind, label, icon: KindIcon }) => {
+                  {OBJECT_KINDS.filter(item => profile.databaseType !== "mysql" || item.kind !== "SEQUENCE").map(({ kind, label, icon: KindIcon }) => {
                     const key = objectKey(profile.id, schema, kind);
                     const objects = props.objectsByKey[key];
                     const filtered = (objects ?? []).filter(object => !needle || object.name.toLowerCase().includes(needle));
@@ -233,12 +235,12 @@ export function Sidebar(props: SidebarProps) {
 
       {contextMenu && <div className="tree-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={event => event.stopPropagation()}>
         {contextMenu.object
-          ? <><button onClick={() => { props.onEditTable(contextMenu.profileId, contextMenu.object!); setContextMenu(null); }}>编辑表</button><button disabled={contextMenu.loadingLongRow || contextMenu.longRowStatusError} onClick={() => { props.onSetLongRow(contextMenu.profileId, contextMenu.object!, !contextMenu.longRowEnabled); setContextMenu(null); }}>{contextMenu.loadingLongRow ? "正在读取超长记录状态…" : contextMenu.longRowStatusError ? "无法读取超长记录状态" : contextMenu.longRowEnabled ? "关闭超长记录" : "启用超长记录"}</button></>
+          ? <><button onClick={() => { props.onEditTable(contextMenu.profileId, contextMenu.object!); setContextMenu(null); }}>编辑表</button>{contextMenu.databaseType === "dm" && <button disabled={contextMenu.loadingLongRow || contextMenu.longRowStatusError} onClick={() => { props.onSetLongRow(contextMenu.profileId, contextMenu.object!, !contextMenu.longRowEnabled); setContextMenu(null); }}>{contextMenu.loadingLongRow ? "正在读取超长记录状态…" : contextMenu.longRowStatusError ? "无法读取超长记录状态" : contextMenu.longRowEnabled ? "关闭超长记录" : "启用超长记录"}</button>}</>
           : <button onClick={() => { props.onNewTable(contextMenu.profileId, contextMenu.schema); setContextMenu(null); }}>新建表</button>}
       </div>}
 
       <footer className="sidebar-footer">
-        {active && <div className="active-connection"><span className={`connection-dot${active.connected ? " online" : ""}`} /><span>{active.name}</span><small>{active.connected ? "已连接" : "未连接"}</small></div>}
+        {active && <div className="active-connection"><span className={`connection-dot${active.connected ? " online" : ""}`} /><span>{active.name}</span><em className={`database-type-badge ${active.databaseType}`}>{databaseTypeLabel(active.databaseType)}</em><small>{active.connected ? "已连接" : "未连接"}</small></div>}
       </footer>
     </aside>
   );

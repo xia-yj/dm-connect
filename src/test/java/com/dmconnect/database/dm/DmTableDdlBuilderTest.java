@@ -53,8 +53,23 @@ class DmTableDdlBuilderTest {
                 column(null, "A", "VARCHAR", 10, null, true, false, "0; DROP TABLE T")
         ), null))).isInstanceOf(RpcException.class);
         assertThatThrownBy(() -> ddl.create(new DmTableDdlBuilder.Definition("S", "T", List.of(
-                column(null, "A", "TEXT", null, null, true, false, null)
+                column(null, "A", "NOT_A_DM_TYPE", null, null, true, false, null)
         ), null))).isInstanceOf(RpcException.class);
+    }
+
+    @Test
+    void buildsAllDmBuiltInTypeFamilies() {
+        String sql = ddl.create(new DmTableDdlBuilder.Definition("S", "ALL_TYPES", List.of(
+                column(null, "NAME", "CHAR", 32, null, true, false, null),
+                column(null, "AMOUNT", "NUMBER", 18, 2, true, false, null),
+                column(null, "PAYLOAD", "VARBINARY", 256, null, true, false, null),
+                column(null, "EVENT_TIME", "TIMESTAMP WITH TIME ZONE", null, 6, true, false, null),
+                column(null, "DURATION", "INTERVAL DAY TO SECOND", null, null, true, false, null),
+                column(null, "CONTENT", "TEXT", null, null, true, false, null)
+        ), null));
+
+        assertThat(sql).contains("\"NAME\" CHAR(32)", "\"AMOUNT\" NUMBER(18,2)", "\"PAYLOAD\" VARBINARY(256)",
+                "\"EVENT_TIME\" TIMESTAMP(6) WITH TIME ZONE", "\"DURATION\" INTERVAL DAY TO SECOND", "\"CONTENT\" TEXT");
     }
 
     private static DmTableDdlBuilder.Column column(String original, String name, String type, Integer length,

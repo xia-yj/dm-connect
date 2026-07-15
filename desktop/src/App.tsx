@@ -4,17 +4,18 @@ import {
   Plus, RefreshCw, Settings, Unplug, X
 } from "lucide-react";
 import { asRpcError, errorMessage, rpc } from "./api";
+import { databaseTypeLabel } from "./database";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ConfirmModal, Modal } from "./components/Modal";
 import { HistoryModal } from "./components/HistoryModal";
 import { ObjectView } from "./components/ObjectView";
 import { Sidebar } from "./components/Sidebar";
 import { SqlWorkspace } from "./components/SqlWorkspace";
-import { TableDesignerModal } from "./components/TableDesignerModal";
+import { supportedTableTypes, TableDesignerModal } from "./components/TableDesignerModal";
 import { WelcomePanel } from "./components/WelcomePanel";
 import type {
-  BootstrapData, ConnectionProfile, DatabaseObject, DatabaseObjectKind,
-  AppUpdateInfo, DriverDescriptor, HistoryEntry, ObjectLoadResult, QueryOpenResult, QueryStatus, TableDefinitionDraft, TableDetails, WorkspaceTab
+  BootstrapData, ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType,
+  AppUpdateInfo, HistoryEntry, ObjectLoadResult, QueryOpenResult, QueryStatus, TableDefinitionDraft, TableDetails, WorkspaceTab
 } from "./types";
 import type { PagedResultTable } from "./types";
 
@@ -31,6 +32,7 @@ interface PendingClose {
 
 interface TableDesignerState {
   profileId: string;
+  databaseType: DatabaseType;
   schema: string;
   object?: DatabaseObject;
   details?: TableDetails;
@@ -201,12 +203,16 @@ export default function App() {
   async function editTable(profileId: string, object: DatabaseObject, focusColumnName?: string) {
     setStatus(`正在读取 ${object.schema}.${object.name} 的表结构…`);
     try {
+      const profile = data?.profiles.find(item => item.id === profileId);
+      if (!profile) throw new Error("找不到数据库连接配置");
       const result = await rpc<ObjectLoadResult>("object.load", { profileId, ...object });
       if (!result.details) throw new Error(result.detailsError || "未能读取表结构");
-      const supportedTypes = new Set(["VARCHAR", "CHAR", "INT", "BIGINT", "DECIMAL", "DATE", "TIME", "TIMESTAMP", "CLOB", "BLOB"]);
+      const unsafe = result.details.columns.find(column => column.safelyEditable === false);
+      if (unsafe) throw new Error(`字段“${unsafe.name}”不能安全地使用表设计器编辑：${unsafe.editWarning || "包含图形化 DDL 暂无法完整保留的属性"}，请通过 SQL 工作台处理`);
+      const supportedTypes = supportedTableTypes(profile.databaseType);
       const unsupported = result.details.columns.find(column => !supportedTypes.has(column.typeName.toUpperCase()));
-      if (unsupported) throw new Error(`字段“${unsupported.name}”使用 ${unsupported.typeName} 类型，当前表设计器仅支持达梦常用字段类型，请通过 SQL 工作台编辑`);
-      setTableDesigner({ profileId, schema: object.schema, object, details: result.details, focusColumnName });
+      if (unsupported) throw new Error(`字段“${unsupported.name}”使用 ${unsupported.typeName} 类型，当前 ${profile.databaseType === "mysql" ? "MySQL" : "达梦"} 表设计器尚不支持，请通过 SQL 工作台编辑`);
+      setTableDesigner({ profileId, databaseType: profile.databaseType, schema: object.schema, object, details: result.details, focusColumnName });
       setStatus("表结构已加载");
     } catch (cause) {
       setStatus(`读取表结构失败：${errorMessage(cause)}`);
@@ -293,7 +299,7 @@ export default function App() {
     try {
       const opened = await rpc<QueryOpenResult>("query.open", { profileId: profile.id });
       const id = `sql:${opened.sessionId}`;
-      setTabs(value => [...value, { id, type: "sql", title: `SQL · ${profile.name}`, profileId: profile.id, profileName: profile.name, sessionId: opened.sessionId, initialSql }]);
+      setTabs(value => [...value, { id, type: "sql", title: `SQL · ${profile.name}`, profileId: profile.id, profileName: profile.name, databaseType: profile.databaseType, sessionId: opened.sessionId, initialSql }]);
       setActiveTabId(id);
       setStatus(`SQL 会话已创建 · ${profile.name}`);
     } catch (cause) {
@@ -334,19 +340,6 @@ export default function App() {
       removeTab(tab.id);
     } catch (cause) {
       setStatus(`关闭 SQL 标签失败：${errorMessage(cause)}`);
-    }
-  }
-
-  async function importDriver() {
-    const path = await window.dmConnect.selectDriver();
-    if (!path) return;
-    setStatus("正在校验并导入 JDBC 驱动…");
-    try {
-      const driver = await rpc<DriverDescriptor>("driver.import", { path });
-      await loadBootstrap();
-      setStatus(`已导入 ${driver.displayName} · 驱动版本 ${driver.version}`);
-    } catch (cause) {
-      setStatus(`驱动导入失败：${errorMessage(cause)}`);
     }
   }
 
@@ -448,7 +441,10 @@ export default function App() {
         onRefresh={refreshSchemas}
         onLoadObjects={loadObjects}
         onOpenObject={openObject}
-        onNewTable={(profileId, schema) => setTableDesigner({ profileId, schema })}
+        onNewTable={(profileId, schema) => {
+          const profile = data.profiles.find(item => item.id === profileId);
+          if (profile) setTableDesigner({ profileId, databaseType: profile.databaseType, schema });
+        }}
         onEditTable={(profileId, object) => void editTable(profileId, object)}
         onGetLongRowStatus={getLongRowStatus}
         onSetLongRow={(profileId, object, enabled) => void setLongRow(profileId, object, enabled)}
@@ -462,7 +458,7 @@ export default function App() {
         <header className="workspace-toolbar">
           <div className="toolbar-context">
             <span className={`context-icon${selectedProfile?.connected ? " online" : ""}`}><Database size={17} /></span>
-            <div><strong>{selectedProfile?.name ?? "DM Connect 工作台"}</strong><small>{selectedProfile ? `${selectedProfile.username}@${selectedProfile.host}:${selectedProfile.port}` : "选择或创建数据库连接"}</small></div>
+            <div><span className="connection-name"><strong>{selectedProfile?.name ?? "DM Connect 工作台"}</strong>{selectedProfile && <em className={`database-type-badge ${selectedProfile.databaseType}`}>{databaseTypeLabel(selectedProfile.databaseType)}</em>}</span><small>{selectedProfile ? `${selectedProfile.username}@${selectedProfile.host}:${selectedProfile.port}` : "选择或创建数据库连接"}</small></div>
           </div>
           <span className="app-status">{status}</span>
           <div className="workspace-actions">
@@ -491,9 +487,9 @@ export default function App() {
 
         <div className="workspace-content">
           {tabs.map(tab => <div key={tab.id} className={`workspace-panel${activeTabId === tab.id ? " active" : ""}`}>
-            {tab.type === "welcome" && <WelcomePanel data={data} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={importDriver} onConnect={profile => profile.connected ? setSelectedProfileId(profile.id) : connect(profile)} />}
+            {tab.type === "welcome" && <WelcomePanel data={data} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onConnect={profile => profile.connected ? setSelectedProfileId(profile.id) : connect(profile)} />}
             {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onEditTable={columnName => void editTable(tab.profileId, tab.result.object, columnName)} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
-            {tab.type === "sql" && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={tab.initialSql} />}
+            {tab.type === "sql" && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={tab.initialSql} />}
           </div>)}
         </div>
       </main>
@@ -509,6 +505,7 @@ export default function App() {
         onSaved={() => { setConnectionModal(null); void loadBootstrap(); setStatus("连接配置已保存"); }}
       />}
       {tableDesigner && <TableDesignerModal
+        databaseType={tableDesigner.databaseType}
         object={tableDesigner.object}
         details={tableDesigner.details}
         schema={tableDesigner.schema}
@@ -522,7 +519,7 @@ export default function App() {
         <label className="field-label">数据库密码<input autoFocus className="field-input" type="password" value={passwordPrompt.password} onChange={event => setPasswordPrompt({ ...passwordPrompt, password: event.target.value })} onKeyDown={event => { if (event.key === "Enter" && passwordPrompt.password) { setPasswordPrompt({ ...passwordPrompt, busy: true, error: "" }); void connect(passwordPrompt.profile, passwordPrompt.password); } }} /></label>{passwordPrompt.error && <div className="form-error">{passwordPrompt.error}</div>}
       </Modal>}
       {settingsOpen && <Modal title="DM Connect 设置" description={`桌面客户端 ${data.version}`} onClose={() => setSettingsOpen(false)} footer={<button className="button primary" onClick={() => setSettingsOpen(false)}>完成</button>}>
-        <div className="settings-list"><section><span><FileUp size={18} /></span><div><strong>达梦 JDBC 驱动</strong><small>已导入 {data.drivers.length} 个驱动，运行时独立加载</small></div><button className="button secondary compact" onClick={importDriver}>导入 JAR</button></section><section className="update-settings"><span><RefreshCw size={18} /></span><div><strong>应用更新</strong><small>更新清单地址</small><input className="field-input" value={updateManifestUrl} placeholder="http://服务器地址/dm-connect-updates/update.json" onChange={event => setUpdateManifestUrl(event.target.value)} /></div><button className="button secondary compact" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForAppUpdate(false)}>{checkingUpdate ? "检查中" : "检查更新"}</button></section><section><span><LockKeyhole size={18} /></span><div><strong>本地数据</strong><small>密码和 SQL 历史仅保存在本机，应用自动管理加密密钥</small></div><button className="button danger-text compact" onClick={() => setResetConfirm(true)}>清除</button></section></div>
+        <div className="settings-list"><section><span><FileUp size={18} /></span><div><strong>JDBC 驱动</strong><small>MySQL Connector/J 已内置；DM 或其他 MySQL 版本可从连接窗口导入</small></div><button className="button secondary compact" onClick={() => { setSettingsOpen(false); setConnectionModal("new"); }}>管理驱动</button></section><section className="update-settings"><span><RefreshCw size={18} /></span><div><strong>应用更新</strong><small>更新清单地址</small><input className="field-input" value={updateManifestUrl} placeholder="http://服务器地址/dm-connect-updates/update.json" onChange={event => setUpdateManifestUrl(event.target.value)} /></div><button className="button secondary compact" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForAppUpdate(false)}>{checkingUpdate ? "检查中" : "检查更新"}</button></section><section><span><LockKeyhole size={18} /></span><div><strong>本地数据</strong><small>密码和 SQL 历史仅保存在本机，应用自动管理加密密钥</small></div><button className="button danger-text compact" onClick={() => setResetConfirm(true)}>清除</button></section></div>
       </Modal>}
       {updateDialog && <Modal title={`发现新版本 ${updateDisplayVersion(updateDialog)}`} description="下载完成后，应用会自动退出、替换并重启。" onClose={() => !installingUpdate && setUpdateDialog(null)} footer={<><button className="button secondary" disabled={installingUpdate} onClick={() => setUpdateDialog(null)}>稍后</button><button className="button primary" disabled={installingUpdate} onClick={() => void installAvailableUpdate()}>{installingUpdate && <LoaderCircle className="spin" size={15} />}{installingUpdate ? `正在下载${updateDownloadProgress == null ? "" : ` ${updateDownloadProgress}%`}` : "立即更新"}</button></>}><p className="confirm-message">{updateDialog.notes?.trim() || "本次更新已准备好，可以立即安装。"}</p>{installingUpdate && <div className="update-download-progress" aria-label="更新下载进度"><div><span>正在下载更新包</span><strong>{updateDownloadProgress == null ? "准备中" : `${updateDownloadProgress}%`}</strong></div><i><b style={{ width: `${updateDownloadProgress ?? 0}%` }} /></i></div>}</Modal>}
       {deleteTarget && <ConfirmModal title="删除数据库连接" message={`确认删除“${deleteTarget.name}”吗？保存的密码也会一并删除。`} confirmText="删除连接" danger onCancel={() => setDeleteTarget(null)} onConfirm={() => void deleteProfile()} />}

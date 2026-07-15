@@ -12,12 +12,16 @@ final class DriverRuntime implements AutoCloseable {
         this.classLoader = classLoader;
     }
 
+    DriverRuntime(Driver driver) {
+        this(driver, null);
+    }
+
     Driver driver() {
         return driver;
     }
 
     @Override
     public void close() throws Exception {
-        classLoader.close();
+        if (classLoader != null) classLoader.close();
     }
 }

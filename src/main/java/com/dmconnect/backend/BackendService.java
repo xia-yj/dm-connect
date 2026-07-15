@@ -2,6 +2,8 @@ package com.dmconnect.backend;
 
 import com.dmconnect.AppContext;
 import com.dmconnect.database.dm.DmTableDdlBuilder;
+import com.dmconnect.database.mysql.MySqlTableDdlBuilder;
+import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.model.ConnectionProfile;
 import com.dmconnect.model.DatabaseObject;
 import com.dmconnect.model.DatabaseObjectKind;
@@ -39,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class BackendService implements AutoCloseable {
@@ -63,7 +66,7 @@ public final class BackendService implements AutoCloseable {
             case "app.ping" -> Map.of("ok", true, "version", VERSION);
             case "storage.reset" -> resetLocalData();
             case "driver.list" -> driverViews();
-            case "driver.import" -> importDriver(requiredText(safeParams, "path"));
+            case "driver.import" -> importDriver(requiredText(safeParams, "path"), safeParams.path("databaseType").asText("dm"));
             case "profile.list" -> profileViews();
             case "profile.save" -> saveProfile(safeParams);
             case "profile.copy" -> copyProfile(requiredText(safeParams, "profileId"));
@@ -104,6 +107,9 @@ public final class BackendService implements AutoCloseable {
         result.put("version", VERSION);
         result.put("profiles", profileViews());
         result.put("drivers", driverViews());
+        result.put("databaseTypes", context.databaseAdapters().values().stream()
+                .map(adapter -> Map.of("id", adapter.id(), "displayName", adapter.displayName(), "defaultPort", adapter.defaultPort(), "driverClass", adapter.driverClassName()))
+                .toList());
         result.put("connectedProfileIds", List.copyOf(workspaces.keySet()));
         context.vault().legacyBackup().ifPresent(path ->
                 result.put("legacyVaultBackup", path.toAbsolutePath().toString()));
@@ -126,13 +132,21 @@ public final class BackendService implements AutoCloseable {
         result.put("displayName", driver.displayName());
         result.put("sha256", driver.sha256());
         result.put("driverClass", driver.driverClass());
+        result.put("builtIn", driver.storedPath().startsWith("classpath:"));
+        result.put("databaseType", databaseTypeForDriver(driver));
         result.put("version", driver.version());
         result.put("importedAt", driver.importedAt());
         return result;
     }
 
-    private Object importDriver(String source) throws Exception {
-        return driverView(context.drivers().importDriver(Path.of(source)));
+    private Object importDriver(String source, String databaseType) throws Exception {
+        return driverView(context.drivers().importDriver(Path.of(source), context.databaseAdapter(databaseType)));
+    }
+
+    private String databaseTypeForDriver(DriverDescriptor driver) {
+        return context.databaseAdapters().values().stream()
+                .filter(adapter -> adapter.driverClassName().equals(driver.driverClass()))
+                .map(DatabaseAdapter::id).findFirst().orElse("unknown");
     }
 
     private List<Map<String, Object>> profileViews() throws Exception {
@@ -148,6 +162,7 @@ public final class BackendService implements AutoCloseable {
         result.put("databaseType", profile.databaseType());
         result.put("host", profile.host());
         result.put("port", profile.port());
+        result.put("database", profile.database());
         result.put("username", profile.username());
         result.put("driverId", profile.driverId());
         result.put("advancedProperties", profile.advancedProperties());
@@ -231,7 +246,7 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = new BackendWorkspace(context, profile, password);
         Arrays.fill(password, '\0');
         try (Connection connection = workspace.openConnection()) {
-            List<String> schemas = context.databaseAdapter().metadataProvider().listSchemas(connection);
+            List<String> schemas = adapter(workspace).metadataProvider().listSchemas(connection);
             workspaces.put(profileId, workspace);
             return Map.of("profile", profileView(profile), "schemas", schemas);
         } catch (Exception exception) {
@@ -258,7 +273,7 @@ public final class BackendService implements AutoCloseable {
     private List<String> schemas(String profileId) throws Exception {
         BackendWorkspace workspace = requiredWorkspace(profileId);
         try (Connection connection = workspace.openConnection()) {
-            return context.databaseAdapter().metadataProvider().listSchemas(connection);
+            return adapter(workspace).metadataProvider().listSchemas(connection);
         }
     }
 
@@ -267,19 +282,29 @@ public final class BackendService implements AutoCloseable {
         String schema = requiredText(params, "schema");
         DatabaseObjectKind kind = DatabaseObjectKind.valueOf(requiredText(params, "kind"));
         try (Connection connection = workspace.openConnection()) {
-            return context.databaseAdapter().metadataProvider().listObjects(connection, schema, kind);
+            return adapter(workspace).metadataProvider().listObjects(connection, schema, kind);
         }
     }
 
     private Object createTable(JsonNode params) throws Exception {
         String profileId = requiredText(params, "profileId");
         DmTableDdlBuilder.Definition definition = tableDefinition(params);
-        DmTableDdlBuilder ddl = new DmTableDdlBuilder(context.databaseAdapter());
-        String sql = ddl.create(definition);
         BackendWorkspace workspace = requiredWorkspace(profileId);
+        DatabaseAdapter adapter = adapter(workspace);
+        String sql;
+        List<String> comments;
+        if (adapter.id().equals("mysql")) {
+            MySqlTableDdlBuilder ddl = new MySqlTableDdlBuilder(adapter);
+            sql = ddl.create(definition);
+            comments = ddl.createComments(definition);
+        } else {
+            DmTableDdlBuilder ddl = new DmTableDdlBuilder(adapter);
+            sql = ddl.create(definition);
+            comments = ddl.createComments(definition);
+        }
         try (Connection connection = workspace.openConnection(); var statement = connection.createStatement()) {
             statement.execute(sql);
-            for (String comment : ddl.createComments(definition)) statement.execute(comment);
+            for (String comment : comments) statement.execute(comment);
         }
         return Map.of("created", true, "sql", sql);
     }
@@ -288,9 +313,11 @@ public final class BackendService implements AutoCloseable {
         String profileId = requiredText(params, "profileId");
         DmTableDdlBuilder.Definition original = tableDefinition(params.path("original"));
         DmTableDdlBuilder.Definition target = tableDefinition(params.path("target"));
-        DmTableDdlBuilder ddl = new DmTableDdlBuilder(context.databaseAdapter());
-        List<String> statements = ddl.alter(original, target);
         BackendWorkspace workspace = requiredWorkspace(profileId);
+        DatabaseAdapter adapter = adapter(workspace);
+        List<String> statements = adapter.id().equals("mysql")
+                ? new MySqlTableDdlBuilder(adapter).alter(original, target)
+                : new DmTableDdlBuilder(adapter).alter(original, target);
         try (Connection connection = workspace.openConnection(); var statement = connection.createStatement()) {
             for (String sql : statements) statement.execute(sql);
         }
@@ -300,9 +327,11 @@ public final class BackendService implements AutoCloseable {
     private Object longRowStatus(JsonNode params) throws Exception {
         DatabaseObject table = tableObject(params);
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
+        if (!adapter(workspace).id().equals("dm")) return Map.of("enabled", false, "supported", false);
         try (Connection connection = workspace.openConnection()) {
-            String ddl = context.databaseAdapter().ddlProvider().getDdl(connection, table);
-            return Map.of("enabled", ddl != null && ddl.toUpperCase(java.util.Locale.ROOT).matches("(?s).*\\bUSING\\s+LONG\\s+ROW\\b.*"));
+            DatabaseAdapter adapter = adapter(workspace);
+            String ddl = adapter.ddlProvider().getDdl(connection, table);
+            return Map.of("enabled", ddl != null && ddl.toUpperCase(java.util.Locale.ROOT).matches("(?s).*\\bUSING\\s+LONG\\s+ROW\\b.*"), "supported", true);
         }
     }
 
@@ -310,8 +339,9 @@ public final class BackendService implements AutoCloseable {
         DatabaseObject table = tableObject(params);
         boolean enabled = params.path("enabled").asBoolean();
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
-        String source = context.databaseAdapter().quoteIdentifier(table.schema()) + "."
-                + context.databaseAdapter().quoteIdentifier(table.name());
+        DatabaseAdapter adapter = adapter(workspace);
+        if (!adapter.id().equals("dm")) throw new RpcException("UNSUPPORTED_OPERATION", "超长记录设置仅适用于达梦数据库");
+        String source = adapter.quoteIdentifier(table.schema()) + "." + adapter.quoteIdentifier(table.name());
         try (Connection connection = workspace.openConnection(); Statement statement = connection.createStatement()) {
             statement.execute("ALTER TABLE " + source + (enabled ? " ENABLE USING LONG ROW" : " DISABLE USING LONG ROW"));
         }
@@ -362,18 +392,18 @@ public final class BackendService implements AutoCloseable {
         try (Connection connection = workspace.openConnection()) {
             if (object.kind() == DatabaseObjectKind.TABLE) {
                 try {
-                    details = context.databaseAdapter().metadataProvider().describeTable(connection, object);
+                    details = adapter(workspace).metadataProvider().describeTable(connection, object);
                 } catch (Exception exception) {
                     detailsError = "读取表结构失败：" + rootMessage(exception);
                 }
                 try {
-                    preview = context.databaseAdapter().metadataProvider().previewTable(connection, object, 0, 100);
+                    preview = adapter(workspace).metadataProvider().previewTable(connection, object, 0, 100);
                 } catch (Exception exception) {
                     previewError = "读取数据预览失败：" + rootMessage(exception);
                 }
             }
             try {
-                ddl = context.databaseAdapter().ddlProvider().getDdl(connection, object);
+                ddl = adapter(workspace).ddlProvider().getDdl(connection, object);
             } catch (Exception exception) {
                 ddlError = "读取 DDL 失败：" + rootMessage(exception) + "。当前用户可能没有该对象的元数据权限。";
             }
@@ -400,12 +430,12 @@ public final class BackendService implements AutoCloseable {
         int page = Math.max(1, Math.min(1_000_000, params.path("page").asInt(1)));
         PreviewFilter filter = previewFilter(params);
         try (Connection connection = workspace.openConnection()) {
-            TablePreview preview = context.databaseAdapter().metadataProvider()
+            TablePreview preview = adapter(workspace).metadataProvider()
                     .previewTable(connection, object, (page - 1) * pageSize, pageSize, filter);
             long lastPage = Math.max(1, (preview.totalRows() + pageSize - 1) / pageSize);
             int safePage = (int) Math.min(page, lastPage);
             if (safePage != page) {
-                preview = context.databaseAdapter().metadataProvider()
+                preview = adapter(workspace).metadataProvider()
                         .previewTable(connection, object, (safePage - 1) * pageSize, pageSize, filter);
             }
             return previewView(preview, safePage, pageSize);
@@ -441,7 +471,7 @@ public final class BackendService implements AutoCloseable {
         DatabaseObject object = new DatabaseObject(requiredText(params, "schema"), requiredText(params, "name"),
                 DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
         try (Connection connection = workspace.openConnection()) {
-            return Map.of("updated", updateObjectCell(connection, object, requiredText(params, "column"),
+            return Map.of("updated", updateObjectCell(connection, adapter(workspace), object, requiredText(params, "column"),
                     params.get("value"), params.path("keyValues")));
         }
     }
@@ -458,7 +488,7 @@ public final class BackendService implements AutoCloseable {
             try {
                 int updated = 0;
                 for (JsonNode change : changes) {
-                    updated += updateObjectCell(connection, object, requiredText(change, "column"),
+                    updated += updateObjectCell(connection, adapter(workspace), object, requiredText(change, "column"),
                             change.get("value"), change.path("keyValues"));
                 }
                 connection.commit();
@@ -472,7 +502,7 @@ public final class BackendService implements AutoCloseable {
         }
     }
 
-    private int updateObjectCell(Connection connection, DatabaseObject object, String requestedColumn,
+    private int updateObjectCell(Connection connection, DatabaseAdapter adapter, DatabaseObject object, String requestedColumn,
                                  JsonNode value, JsonNode keyValues) throws Exception {
         if (object.kind() != DatabaseObjectKind.TABLE) {
             throw new RpcException("INVALID_OBJECT", "只有数据表支持直接编辑");
@@ -480,23 +510,49 @@ public final class BackendService implements AutoCloseable {
         if (!keyValues.isObject()) throw new RpcException("INVALID_REQUEST", "缺少用于定位记录的主键值");
 
         DatabaseMetaData metadata = connection.getMetaData();
-        List<String> columns = new ArrayList<>();
-        try (var rs = metadata.getColumns(null, object.schema(), object.name(), "%")) {
-            while (rs.next()) columns.add(rs.getString("COLUMN_NAME"));
+        String column = null;
+        int columnType = Types.OTHER;
+        boolean autoIncrement = false;
+        boolean generated = false;
+        try (var rs = metadata.getColumns(adapter.metadataCatalog(object.schema()), adapter.metadataSchema(object.schema()), object.name(), "%")) {
+            while (rs.next()) {
+                String candidate = rs.getString("COLUMN_NAME");
+                if (candidate == null || !candidate.equalsIgnoreCase(requestedColumn)) continue;
+                column = candidate;
+                columnType = rs.getInt("DATA_TYPE");
+                try {
+                    autoIncrement = "YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT"));
+                } catch (java.sql.SQLException ignored) {
+                    // Optional in older JDBC drivers.
+                }
+                try {
+                    generated = "YES".equalsIgnoreCase(rs.getString("IS_GENERATEDCOLUMN"));
+                } catch (java.sql.SQLException ignored) {
+                    // Optional in older JDBC drivers.
+                }
+                break;
+            }
         }
-        String column = columns.stream().filter(name -> name.equalsIgnoreCase(requestedColumn)).findFirst()
-                .orElseThrow(() -> new RpcException("INVALID_COLUMN", "找不到要更新的列：" + requestedColumn));
+        if (column == null) throw new RpcException("INVALID_COLUMN", "找不到要更新的列：" + requestedColumn);
+        if (autoIncrement || generated) {
+            throw new RpcException("READ_ONLY_COLUMN", "自增列或生成列不能直接编辑");
+        }
+        if (!directlyEditableJdbcType(columnType)) {
+            throw new RpcException("READ_ONLY_COLUMN", "大对象、二进制或复杂类型不能在数据预览中直接编辑，请使用 SQL 工作台");
+        }
         List<String> primaryKeys = new ArrayList<>();
-        try (var rs = metadata.getPrimaryKeys(null, object.schema(), object.name())) {
+        try (var rs = metadata.getPrimaryKeys(adapter.metadataCatalog(object.schema()), adapter.metadataSchema(object.schema()), object.name())) {
             while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
         }
         if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地直接编辑数据");
+        if (primaryKeys.stream().anyMatch(key -> key.equalsIgnoreCase(requestedColumn))) {
+            throw new RpcException("READ_ONLY_COLUMN", "主键列不能在数据预览中直接编辑");
+        }
 
-        String source = context.databaseAdapter().quoteIdentifier(object.schema()) + "."
-                + context.databaseAdapter().quoteIdentifier(object.name());
-        String where = primaryKeys.stream().map(key -> context.databaseAdapter().quoteIdentifier(key) + " = ?")
+        String source = adapter.quoteIdentifier(object.schema()) + "." + adapter.quoteIdentifier(object.name());
+        String where = primaryKeys.stream().map(key -> adapter.quoteIdentifier(key) + " = ?")
                 .collect(java.util.stream.Collectors.joining(" AND "));
-        String sql = "UPDATE " + source + " SET " + context.databaseAdapter().quoteIdentifier(column) + " = ? WHERE " + where;
+        String sql = "UPDATE " + source + " SET " + adapter.quoteIdentifier(column) + " = ? WHERE " + where;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             bindJsonValue(statement, 1, value);
             for (int index = 0; index < primaryKeys.size(); index++) {
@@ -518,6 +574,15 @@ public final class BackendService implements AutoCloseable {
         }
     }
 
+    private static boolean directlyEditableJdbcType(int type) {
+        return switch (type) {
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB,
+                    Types.CLOB, Types.NCLOB, Types.LONGVARCHAR, Types.LONGNVARCHAR,
+                    Types.SQLXML, Types.ARRAY, Types.STRUCT, Types.JAVA_OBJECT, Types.OTHER -> false;
+            default -> true;
+        };
+    }
+
     private Object openQuery(String profileId) throws Exception {
         BackendWorkspace workspace = requiredWorkspace(profileId);
         BackendQuery query = new BackendQuery(profileId, workspace, workspace.openSession());
@@ -536,11 +601,24 @@ public final class BackendService implements AutoCloseable {
         BackendQuery query = requiredQuery(params);
         String sql = requiredText(params, "sql");
         String mode = params.path("mode").asText("SCRIPT");
+        boolean mysqlBackslashEscapes = true;
+        boolean mysqlAnsiQuotes = false;
+        if ("mysql".equalsIgnoreCase(query.databaseType())) {
+            try {
+                Set<String> sqlModes = query.session().mysqlSqlModes();
+                mysqlBackslashEscapes = !sqlModes.contains("NO_BACKSLASH_ESCAPES");
+                mysqlAnsiQuotes = sqlModes.contains("ANSI_QUOTES");
+            } catch (java.sql.SQLException ignored) {
+                // Fall back to MySQL's default mode if a compatible server hides sql_mode.
+            }
+        }
+        final boolean backslashEscapes = mysqlBackslashEscapes;
+        final boolean ansiQuotes = mysqlAnsiQuotes;
         List<String> statements = switch (mode) {
-            case "SELECTION" -> parser.split(params.path("selection").asText(""));
-            case "CURRENT_STATEMENT" -> parser.currentStatement(sql, params.path("caretOffset").asInt(0))
+            case "SELECTION" -> parser.split(params.path("selection").asText(""), query.databaseType(), backslashEscapes, ansiQuotes);
+            case "CURRENT_STATEMENT" -> parser.currentStatement(sql, params.path("caretOffset").asInt(0), query.databaseType(), backslashEscapes, ansiQuotes)
                     .map(statement -> List.of(statement.sql())).orElseGet(List::of);
-            case "SCRIPT" -> parser.split(sql);
+            case "SCRIPT" -> parser.split(sql, query.databaseType(), backslashEscapes, ansiQuotes);
             default -> throw new RpcException("INVALID_ARGUMENT", "未知的 SQL 执行模式：" + mode);
         };
         if (statements.isEmpty()) throw new RpcException("NO_SQL", "没有可执行的 SQL");
@@ -652,7 +730,7 @@ public final class BackendService implements AutoCloseable {
         if (!"CURRENT_PAGE".equals(scope) && !"ALL".equals(scope)) throw new RpcException("INVALID_ARGUMENT", "未知导出范围");
         Path target = Path.of(requiredText(params, "path"));
         try (Connection connection = workspace.openConnection()) {
-            long rows = InsertSqlExporter.write(connection, context.databaseAdapter(), table, previewFilter(params), offset, maxRows, target);
+            long rows = InsertSqlExporter.write(connection, adapter(workspace), table, previewFilter(params), offset, maxRows, target);
             return Map.of("path", target.toAbsolutePath().toString(), "rows", rows);
         }
     }
@@ -665,7 +743,7 @@ public final class BackendService implements AutoCloseable {
         int page = Math.max(1, params.path("page").asInt(1));
         if (!"CURRENT_PAGE".equals(scope) && !"ALL".equals(scope)) throw new RpcException("INVALID_ARGUMENT", "未知导出范围");
         try (Connection connection = workspace.openConnection()) {
-            long rows = TableCsvExporter.write(connection, context.databaseAdapter(), table, previewFilter(params), "CURRENT_PAGE".equals(scope) ? (page - 1) * pageSize : 0, "CURRENT_PAGE".equals(scope) ? pageSize : 0, Path.of(requiredText(params, "path")));
+            long rows = TableCsvExporter.write(connection, adapter(workspace), table, previewFilter(params), "CURRENT_PAGE".equals(scope) ? (page - 1) * pageSize : 0, "CURRENT_PAGE".equals(scope) ? pageSize : 0, Path.of(requiredText(params, "path")));
             return Map.of("rows", rows);
         }
     }
@@ -723,20 +801,38 @@ public final class BackendService implements AutoCloseable {
         return String.valueOf(value);
     }
 
-    private ConnectionProfile profileFrom(JsonNode params) {
+    private ConnectionProfile profileFrom(JsonNode params) throws Exception {
         String id = params.path("id").asText("").strip();
+        String databaseType = params.path("databaseType").asText("dm").strip().toLowerCase(java.util.Locale.ROOT);
+        DatabaseAdapter adapter = context.databaseAdapter(databaseType);
         String name = requiredText(params, "name").strip();
         String host = requiredText(params, "host").strip();
-        int port = params.path("port").asInt(5236);
+        int port = params.path("port").asInt(adapter.defaultPort());
+        String database = params.path("database").asText("").strip();
         String username = requiredText(params, "username").strip();
         String driverId = requiredText(params, "driverId");
+        Optional<DriverDescriptor> selectedDriver = context.drivers().findById(driverId);
+        if (selectedDriver.isPresent() && !selectedDriver.get().driverClass().equals(adapter.driverClassName())) {
+            throw new RpcException("INVALID_ARGUMENT", "所选 JDBC 驱动不适用于" + adapter.displayName());
+        }
         Map<String, String> properties = new LinkedHashMap<>();
         JsonNode advanced = params.path("advancedProperties");
-        if (advanced.isObject()) advanced.fields().forEachRemaining(entry -> properties.put(entry.getKey(), entry.getValue().asText("")));
+        if (advanced.isObject()) advanced.fields().forEachRemaining(entry -> {
+            if (DatabaseAdapter.isSensitiveProperty(entry.getKey())) {
+                throw new RpcException("INVALID_ARGUMENT", "用户名和密码不能写入高级 JDBC 参数");
+            }
+            if (databaseType.equals("mysql") && (entry.getKey().equalsIgnoreCase("databaseTerm")
+                    || entry.getKey().equalsIgnoreCase("useAffectedRows"))) {
+                throw new RpcException("INVALID_ARGUMENT", "MySQL 高级参数不允许覆盖 " + entry.getKey());
+            }
+            properties.put(entry.getKey(), entry.getValue().asText(""));
+        });
+        // Validate host, port, database path and URL encoding before persisting the profile.
+        adapter.buildJdbcUrl(host, port, database, properties);
         boolean remember = params.path("rememberPassword").asBoolean(true);
         return id.isEmpty()
-                ? ConnectionProfile.create(name, host, port, username, driverId, properties, remember)
-                : new ConnectionProfile(id, name, "dm", host, port, username, driverId, properties, remember);
+                ? ConnectionProfile.create(databaseType, name, host, port, database, username, driverId, properties, remember)
+                : new ConnectionProfile(id, name, databaseType, host, port, database, username, driverId, properties, remember);
     }
 
     private ConnectionProfile requireProfile(String profileId) throws Exception {
@@ -748,6 +844,10 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = workspaces.get(profileId);
         if (workspace == null) throw new RpcException("NOT_CONNECTED", "请先连接数据库");
         return workspace;
+    }
+
+    private DatabaseAdapter adapter(BackendWorkspace workspace) {
+        return context.databaseAdapter(workspace.profile().databaseType());
     }
 
     private BackendQuery requiredQuery(JsonNode params) {

@@ -4,6 +4,7 @@ import com.dmconnect.model.ColumnMetadata;
 import com.dmconnect.model.ResultTable;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Reader;
 import java.sql.Blob;
 import java.sql.Clob;
@@ -11,6 +12,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLXML;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -45,26 +47,64 @@ public final class ResultSetReader {
             }
             List<Object> row = new ArrayList<>(columns.size());
             for (int i = 1; i <= columns.size(); i++) {
-                row.add(safeValue(resultSet.getObject(i)));
+                row.add(readValue(resultSet, columns.get(i - 1), i));
             }
             rows.add(row);
         }
         return new ResultTable(columns, rows, truncated);
     }
 
+    private static Object readValue(ResultSet resultSet, ColumnMetadata column, int index) throws SQLException {
+        if (JdbcValuePolicy.preserveTemporalText(column.typeName())) return resultSet.getString(index);
+        return switch (column.jdbcType()) {
+            case Types.CLOB, Types.NCLOB, Types.LONGVARCHAR, Types.LONGNVARCHAR, Types.SQLXML -> {
+                try (Reader reader = resultSet.getCharacterStream(index)) {
+                    yield reader == null ? null : readLimitedText(reader, "文本");
+                } catch (IOException exception) {
+                    throw new SQLException("读取大文本字段失败", exception);
+                }
+            }
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> {
+                try (InputStream input = resultSet.getBinaryStream(index)) {
+                    yield input == null ? null : readLimitedBinary(input);
+                } catch (IOException exception) {
+                    throw new SQLException("读取二进制字段失败", exception);
+                }
+            }
+            default -> safeValue(resultSet.getObject(index));
+        };
+    }
+
+    private static String readLimitedText(Reader reader, String label) throws IOException {
+        char[] buffer = new char[MAX_TEXT_CHARS + 1];
+        int total = 0;
+        while (total < buffer.length) {
+            int read = reader.read(buffer, total, buffer.length - total);
+            if (read < 0) break;
+            if (read == 0) {
+                int value = reader.read();
+                if (value < 0) break;
+                buffer[total++] = (char) value;
+            } else {
+                total += read;
+            }
+        }
+        boolean truncated = total > MAX_TEXT_CHARS;
+        return new String(buffer, 0, Math.min(total, MAX_TEXT_CHARS))
+                + (truncated ? "\n…<" + label + "已截断>" : "");
+    }
+
+    private static String readLimitedBinary(InputStream input) throws IOException {
+        byte[] preview = input.readNBytes(MAX_BINARY_PREVIEW_BYTES + 1);
+        boolean truncated = preview.length > MAX_BINARY_PREVIEW_BYTES;
+        int length = Math.min(preview.length, MAX_BINARY_PREVIEW_BYTES);
+        return "0x" + HexFormat.of().formatHex(preview, 0, length) + (truncated ? "…<二进制已截断>" : "");
+    }
+
     private static Object safeValue(Object value) throws SQLException {
         if (value instanceof Clob clob) {
             try (Reader reader = clob.getCharacterStream()) {
-                char[] buffer = new char[MAX_TEXT_CHARS + 1];
-                int total = 0;
-                while (total < buffer.length) {
-                    int read = reader.read(buffer, total, buffer.length - total);
-                    if (read < 0) break;
-                    total += read;
-                }
-                boolean truncated = total > MAX_TEXT_CHARS || clob.length() > MAX_TEXT_CHARS;
-                int length = Math.min(total, MAX_TEXT_CHARS);
-                return new String(buffer, 0, length) + (truncated ? "\n…<CLOB 已截断>" : "");
+                return readLimitedText(reader, "CLOB ");
             } catch (IOException exception) {
                 throw new SQLException("读取 CLOB 失败", exception);
             } finally {
@@ -76,12 +116,10 @@ public final class ResultSetReader {
             }
         }
         if (value instanceof Blob blob) {
-            try {
-                long length = blob.length();
-                int previewLength = (int) Math.min(length, MAX_BINARY_PREVIEW_BYTES);
-                byte[] preview = previewLength == 0 ? new byte[0] : blob.getBytes(1, previewLength);
-                String suffix = length > previewLength ? "…" : "";
-                return "<BLOB " + length + " 字节: " + HexFormat.of().formatHex(preview) + suffix + ">";
+            try (InputStream input = blob.getBinaryStream()) {
+                return readLimitedBinary(input);
+            } catch (IOException exception) {
+                throw new SQLException("读取 BLOB 失败", exception);
             } finally {
                 try {
                     blob.free();
@@ -103,6 +141,12 @@ public final class ResultSetReader {
         if (value instanceof byte[] bytes) {
             int length = Math.min(bytes.length, MAX_BINARY_PREVIEW_BYTES);
             return "0x" + HexFormat.of().formatHex(bytes, 0, length) + (bytes.length > length ? "…" : "");
+        }
+        if (value instanceof CharSequence chars) {
+            String text = chars.toString();
+            return text.length() <= MAX_TEXT_CHARS
+                    ? text
+                    : text.substring(0, MAX_TEXT_CHARS) + "\n…<文本已截断>";
         }
         return value;
     }

@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.sql.SQLTimeoutException;
 import java.time.Duration;
 import java.util.Properties;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,12 +21,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ConnectionService implements AutoCloseable {
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
-    private final DatabaseAdapter adapter;
+    private final Map<String, DatabaseAdapter> adapters;
     private final DriverManagerService drivers;
     private final ExecutorService connectorExecutor;
 
     public ConnectionService(DatabaseAdapter adapter, DriverManagerService drivers) {
-        this.adapter = adapter;
+        this(Map.of(adapter.id(), adapter), drivers);
+    }
+
+    public ConnectionService(Map<String, DatabaseAdapter> adapters, DriverManagerService drivers) {
+        this.adapters = Map.copyOf(adapters);
         this.drivers = drivers;
         ThreadFactory factory = runnable -> {
             Thread thread = new Thread(runnable, "dm-connect-connector");
@@ -73,11 +78,15 @@ public final class ConnectionService implements AutoCloseable {
     }
 
     private Connection openConnection(ConnectionProfile profile, char[] password) throws Exception {
-        if (!adapter.id().equals(profile.databaseType())) {
-            throw new IllegalArgumentException("当前版本不支持数据库类型：" + profile.databaseType());
+        DatabaseAdapter adapter = adapters.get(profile.databaseType());
+        if (adapter == null) throw new IllegalArgumentException("当前版本不支持数据库类型：" + profile.databaseType());
+        var descriptor = drivers.findById(profile.driverId())
+                .orElseThrow(() -> new IllegalArgumentException("找不到指定的 JDBC 驱动"));
+        if (!descriptor.driverClass().equals(adapter.driverClassName())) {
+            throw new IllegalArgumentException("所选 JDBC 驱动不适用于" + adapter.displayName());
         }
         Driver driver = drivers.driver(profile.driverId());
-        String url = adapter.buildJdbcUrl(profile.host(), profile.port(), profile.advancedProperties());
+        String url = adapter.buildJdbcUrl(profile.host(), profile.port(), profile.database(), profile.advancedProperties());
         Properties properties = new Properties();
         properties.setProperty("user", profile.username());
         properties.setProperty("password", new String(password));

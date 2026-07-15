@@ -196,7 +196,7 @@ final class ConnectionProfileDialog {
                     username.getText().strip(), driver.getValue().id(), properties, remember.isSelected());
         }
         return new ConnectionProfile(original.id(), name.getText().strip(), original.databaseType(),
-                host.getText().strip(), port.getValue(), username.getText().strip(), driver.getValue().id(),
+                host.getText().strip(), port.getValue(), original.database(), username.getText().strip(), driver.getValue().id(),
                 properties, remember.isSelected());
     }
 

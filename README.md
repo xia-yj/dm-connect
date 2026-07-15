@@ -1,6 +1,6 @@
 # DM Connect 2.0
 
-DM Connect 是面向达梦数据库 DBA 的 macOS 桌面工具。2.0 版已迁移为 **React + Electron + Java 17 后端**：界面使用 React，JDBC、对象元数据、SQL 执行、事务、本地加密存储和 CSV 核心由 Java 负责。
+DM Connect 是支持 **达梦数据库（DM）与 MySQL** 的 macOS 数据库桌面工具。2.0 版使用 **React + Electron + Java 17 后端**：界面使用 React，JDBC、对象元数据、DDL、SQL 执行、事务、本地加密存储和数据导出核心由 Java 负责。
 
 ## 架构
 
@@ -11,19 +11,20 @@ Electron 主进程（校验页面来源与方法白名单）
         ↕ stdin/stdout 单行 JSON RPC（不开放网络端口）
 Java 17 后端（JDBC / 元数据 / SQL / 事务 / 本地加密存储 / CSV）
         ↕ 独立 URLClassLoader
-用户导入的达梦 JDBC JAR
+应用内置 MySQL Connector/J；用户按数据库类型导入的 DM / 其他 MySQL JDBC JAR
 ```
 
 支持功能：
 
-- 新建、编辑、复制、删除、测试和断开达梦连接。
-- 懒加载模式、表、视图、序列、过程、函数和触发器。
-- 双击表名默认展示最多 200 行数据预览，同时可查看列、约束、索引和 DDL。
-- Monaco SQL 多标签工作台，每个标签拥有独立 JDBC 会话和事务状态。
+- 新建、编辑、复制、删除、测试和断开 DM / MySQL 连接，并按连接类型隔离 JDBC 驱动。
+- 懒加载 DM 模式或 MySQL 数据库，以及表、视图、过程、函数和触发器；DM 连接同时支持序列。
+- 双击表名默认展示最多 100 行数据预览，同时可查看列、约束、索引和 DDL。
+- 按数据库类型创建和修改表，提供 DM / MySQL 对应的字段类型、DDL 与安全校验。
+- Monaco SQL 多标签工作台，每个标签拥有独立 JDBC 会话、事务状态和方言提示。
 - 执行选中内容、当前语句或整个脚本，可取消执行，支持多结果集。
 - `DROP` / `TRUNCATE` 二次确认，未提交标签关闭确认。
 - 应用自动管理本机密钥，使用 Argon2id + AES-256-GCM 保存密码和最近 1000 条 SQL 历史。
-- 将当前已加载结果导出为 UTF-8 BOM CSV，不重新执行查询。
+- 支持结果/整表 CSV 导出与表数据 INSERT SQL 导出。
 
 ## 开发环境
 
@@ -31,9 +32,18 @@ Java 17 后端（JDBC / 元数据 / SQL / 事务 / 本地加密存储 / CSV）
 - JDK 17
 - Maven 3.9+
 - Node.js 22+
-- 与目标达梦服务器版本相匹配的官方 JDBC JAR
+- 与目标数据库版本相匹配的 DM JDBC JAR 或 MySQL Connector/J
 
-应用不随包分发达梦 JDBC 驱动。可从达梦安装目录的 `drivers/jdbc` 获取，然后在应用中点击“导入 JAR”。驱动类为 `dm.jdbc.driver.DmDriver`，默认连接地址为 `jdbc:dm://host:5236`。
+MySQL Connector/J 8.3 已随应用后端内置；达梦驱动仍需按服务器版本导入。新建连接时先选择数据库类型，MySQL 默认直接使用内置驱动，也可导入其他版本：
+
+| 数据库 | JDBC 驱动类 | 默认端口 | 连接地址 |
+| --- | --- | ---: | --- |
+| 达梦（DM） | `dm.jdbc.driver.DmDriver` | 5236 | `jdbc:dm://host:5236` |
+| MySQL | `com.mysql.cj.jdbc.Driver` | 3306 | `jdbc:mysql://host:3306/database` |
+
+达梦驱动可从达梦安装目录的 `drivers/jdbc` 获取，应与服务器版本匹配。MySQL 如需替换内置版本，可导入官方 Connector/J 8.x 或 9.x 的 `mysql-connector-j-*.jar`；“默认数据库”可以留空，此时先连接 MySQL 服务器，再从左侧数据库列表选择对象。
+
+连接编辑器的“高级 JDBC 参数”每行填写一个 `key=value`。例如 MySQL 可配置 `sslMode=PREFERRED`、`connectTimeout=10000` 和 `socketTimeout=30000`；用户名、密码、数据库路径等核心参数由专用字段管理，不能通过高级参数覆盖。
 
 ## 本地运行
 
@@ -58,7 +68,7 @@ Java 17 后端（JDBC / 元数据 / SQL / 事务 / 本地加密存储 / CSV）
 
 ## SQL 脚本规则
 
-普通语句使用分号分隔。过程、函数、触发器和匿名块使用独占一行的 `/` 结束：
+普通语句使用分号分隔。DM 的过程、函数、触发器和匿名块使用独占一行的 `/` 结束：
 
 ```sql
 CREATE OR REPLACE PROCEDURE P_TEST AS
@@ -67,6 +77,20 @@ BEGIN
 END;
 /
 ```
+
+MySQL 存储程序脚本支持 `DELIMITER` 切换分隔符：
+
+```sql
+DELIMITER $$
+CREATE PROCEDURE p_test()
+BEGIN
+  INSERT INTO t VALUES (1);
+END$$
+DELIMITER ;
+```
+
+SQL 工作台会根据当前连接显示 `DM SQL` 或 `MySQL SQL`，并提供相应的函数、关键字和代码片段提示。
+MySQL 脚本分割会读取执行前的 `@@SESSION.sql_mode`，兼容 `NO_BACKSLASH_ESCAPES` 和 `ANSI_QUOTES`；如果脚本要修改这些模式，请先单独执行 `SET SESSION sql_mode = ...`，再执行后续脚本。
 
 ## 测试
 
@@ -81,7 +105,7 @@ npm test
 npm run build
 ```
 
-真实达梦集成测试使用 `DM_TEST_HOST`、`DM_TEST_PORT`、`DM_TEST_USER`、`DM_TEST_PASSWORD`、`DM_TEST_SCHEMA` 和 `DM_JDBC_JAR` 注入；未配置时自动跳过。
+真实达梦集成测试使用 `DM_TEST_HOST`、`DM_TEST_PORT`、`DM_TEST_USER`、`DM_TEST_PASSWORD`、`DM_TEST_SCHEMA` 和 `DM_JDBC_JAR` 注入。真实 MySQL 冒烟测试使用 `MYSQL_TEST_HOST`、`MYSQL_TEST_PORT`、`MYSQL_TEST_USER`、`MYSQL_TEST_PASSWORD`、`MYSQL_TEST_DATABASE` 和 `MYSQL_JDBC_JAR`；未完整配置时对应集成测试会自动跳过。
 
 ## 构建 macOS DMG
 
@@ -135,6 +159,8 @@ location /dm-connect-updates/ {
 
 ## 当前边界
 
-- 仅支持达梦数据库和中文界面。
-- 不包含用户权限管理、会话监控、备份恢复、表空间管理、可视化数据编辑、数据导入、Excel 导出、SSH 隧道和证书向导。
-- SSL 等达梦 JDBC 属性通过连接编辑器的“高级 JDBC 参数”传入。
+- 当前支持达梦数据库、MySQL 和中文界面。
+- MySQL 没有序列和 DM“超长记录”功能，因此相关入口只在 DM 连接中显示。
+- MySQL 字段若包含无符号、生成列、列级字符集/排序规则、不可见列等表设计器不能无损保留的属性，会禁止图形化修改并提示改用 SQL 工作台。
+- 不包含用户权限管理、会话监控、备份恢复、表空间管理、数据导入、Excel 导出、SSH 隧道和证书向导。
+- SSL 等数据库 JDBC 属性通过连接编辑器的“高级 JDBC 参数”传入。

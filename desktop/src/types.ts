@@ -1,3 +1,5 @@
+export type DatabaseType = "dm" | "mysql";
+
 export interface DriverDescriptor {
   id: string;
   displayName: string;
@@ -5,14 +7,18 @@ export interface DriverDescriptor {
   driverClass: string;
   version: string;
   importedAt: string;
+  builtIn?: boolean;
+  /** Newer backends provide this; older versions are inferred from driverClass. */
+  databaseType?: DatabaseType;
 }
 
 export interface ConnectionProfile {
   id: string;
   name: string;
-  databaseType: "dm";
+  databaseType: DatabaseType;
   host: string;
   port: number;
+  database: string;
   username: string;
   driverId: string;
   advancedProperties: Record<string, string>;
@@ -24,8 +30,10 @@ export interface ConnectionProfile {
 export interface ProfileDraft {
   id?: string;
   name: string;
+  databaseType: DatabaseType;
   host: string;
   port: number;
+  database: string;
   username: string;
   password: string;
   driverId: string;
@@ -38,6 +46,7 @@ export interface BootstrapData {
   profiles: ConnectionProfile[];
   drivers: DriverDescriptor[];
   connectedProfileIds: string[];
+  databaseTypes?: { id: DatabaseType; displayName: string; defaultPort: number; driverClass: string }[];
   legacyVaultBackup?: string;
 }
 
@@ -88,6 +97,9 @@ export interface ColumnInfo {
   defaultValue: string | null;
   autoIncrement: boolean;
   remarks: string | null;
+  /** False when graphical ALTER would lose engine-specific column attributes. */
+  safelyEditable?: boolean;
+  editWarning?: string;
 }
 
 export interface ConstraintInfo {
@@ -115,7 +127,8 @@ export interface TableDetails {
 export interface TableColumnDraft {
   originalName: string | null;
   name: string;
-  type: "VARCHAR" | "CHAR" | "INT" | "BIGINT" | "DECIMAL" | "DATE" | "TIME" | "TIMESTAMP" | "CLOB" | "BLOB";
+  /** Built-in column type selected for the profile's database engine. */
+  type: string;
   length: number | null;
   scale: number | null;
   nullable: boolean;
@@ -190,4 +203,4 @@ export interface RpcError extends Error {
 export type WorkspaceTab =
   | { id: "welcome"; type: "welcome"; title: string }
   | { id: string; type: "object"; title: string; profileId: string; result: ObjectLoadResult }
-  | { id: string; type: "sql"; title: string; profileId: string; profileName: string; sessionId: string; initialSql: string };
+  | { id: string; type: "sql"; title: string; profileId: string; profileName: string; databaseType: DatabaseType; sessionId: string; initialSql: string };

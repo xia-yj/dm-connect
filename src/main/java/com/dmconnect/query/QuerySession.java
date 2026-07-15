@@ -10,6 +10,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 一个 SQL 标签对应一个独立 JDBC 会话。 */
@@ -117,6 +119,23 @@ public final class QuerySession implements AutoCloseable {
 
     public boolean hasPendingTransaction() {
         return pendingTransaction;
+    }
+
+    /** Reads the current MySQL session mode so script splitting follows quote semantics. */
+    public Set<String> mysqlSqlModes() throws SQLException {
+        synchronized (transactionLock) {
+            ensureOpen();
+            try (Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery("SELECT @@SESSION.sql_mode")) {
+                if (!rows.next()) return Set.of();
+                String modes = rows.getString(1);
+                if (modes == null || modes.isBlank()) return Set.of();
+                return java.util.Arrays.stream(modes.toUpperCase(Locale.ROOT).split(","))
+                        .map(String::strip)
+                        .filter(mode -> !mode.isEmpty())
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            }
+        }
     }
 
     private void ensureOpen() throws SQLException {

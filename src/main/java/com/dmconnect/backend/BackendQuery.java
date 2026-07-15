@@ -29,6 +29,10 @@ final class BackendQuery {
         return profileId;
     }
 
+    String databaseType() {
+        return workspace.profile().databaseType();
+    }
+
     QuerySession session() {
         return session;
     }

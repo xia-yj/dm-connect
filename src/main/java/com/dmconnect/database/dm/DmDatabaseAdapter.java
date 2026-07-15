@@ -44,8 +44,7 @@ public final class DmDatabaseAdapter implements DatabaseAdapter {
 
         String query = advancedProperties.entrySet().stream()
                 .filter(entry -> entry.getKey() != null && !entry.getKey().isBlank())
-                .filter(entry -> !entry.getKey().equalsIgnoreCase("user"))
-                .filter(entry -> !entry.getKey().equalsIgnoreCase("password"))
+                .filter(entry -> !DatabaseAdapter.isSensitiveProperty(entry.getKey()))
                 .sorted(Comparator.comparing(Map.Entry::getKey))
                 .map(entry -> encode(entry.getKey().strip()) + "=" + encode(entry.getValue() == null ? "" : entry.getValue()))
                 .collect(Collectors.joining("&"));

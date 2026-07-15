@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 
 final class BackendErrorFormatter {
     private static final Pattern SECRET = Pattern.compile(
-            "(?i)((?:password|passwd|pwd)\\s*[=:]\\s*)[^\\s,;&]+"
+            "(?i)((?:[a-z0-9_.-]*password[a-z0-9_.-]*|passwd|pwd)\\s*[=:]\\s*)[^\\s,;&]+"
     );
 
     private BackendErrorFormatter() {
@@ -34,7 +34,7 @@ final class BackendErrorFormatter {
             if (!sqlState.isBlank()) details.append("SQLState: ").append(sqlState);
             if (vendorCode != 0) {
                 if (!sqlState.isBlank()) details.append("，");
-                details.append("达梦错误码: ").append(vendorCode);
+                details.append("数据库错误码: ").append(vendorCode);
             }
             result += details.append("）");
         }

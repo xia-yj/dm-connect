@@ -11,10 +11,19 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Builds the limited, GUI-supported subset of DM table DDL. */
+/** Builds DM DDL for all built-in, conventional DM column data types. */
 public final class DmTableDdlBuilder {
     private static final Set<String> TYPES = Set.of(
-            "VARCHAR", "CHAR", "INT", "BIGINT", "DECIMAL", "DATE", "TIME", "TIMESTAMP", "CLOB", "BLOB");
+            "CHAR", "VARCHAR",
+            "TINYINT", "BYTE", "SMALLINT", "INT", "INTEGER", "BIGINT", "NUMERIC", "DECIMAL", "DEC", "NUMBER",
+            "REAL", "FLOAT", "DOUBLE", "DOUBLE PRECISION",
+            "BIT", "BINARY", "VARBINARY",
+            "DATE", "TIME", "TIMESTAMP", "DATETIME", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE",
+            "INTERVAL YEAR", "INTERVAL MONTH", "INTERVAL YEAR TO MONTH", "INTERVAL DAY", "INTERVAL HOUR", "INTERVAL MINUTE", "INTERVAL SECOND", "INTERVAL DAY TO HOUR", "INTERVAL DAY TO MINUTE", "INTERVAL DAY TO SECOND", "INTERVAL HOUR TO MINUTE", "INTERVAL HOUR TO SECOND", "INTERVAL MINUTE TO SECOND",
+            "TEXT", "LONG", "LONGVARCHAR", "IMAGE", "LONGVARBINARY", "BLOB", "CLOB", "BFILE");
+    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
+    private static final Set<String> PRECISION_TYPES = Set.of("NUMERIC", "DECIMAL", "DEC", "NUMBER");
+    private static final Set<String> TIME_SCALE_TYPES = Set.of("TIME", "TIMESTAMP", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE");
     private final DatabaseAdapter adapter;
 
     public DmTableDdlBuilder(DatabaseAdapter adapter) {
@@ -129,14 +138,14 @@ public final class DmTableDdlBuilder {
     private void validateColumn(Column column) {
         String type = normalizedType(column.type());
         if (!TYPES.contains(type)) throw new RpcException("INVALID_ARGUMENT", "不支持的达梦字段类型：" + column.type());
-        if ((type.equals("VARCHAR") || type.equals("CHAR")) && (column.length() == null || column.length() < 1 || column.length() > 32767)) {
+        if (LENGTH_TYPES.contains(type) && (column.length() == null || column.length() < 1 || column.length() > 32767)) {
             throw new RpcException("INVALID_ARGUMENT", type + " 必须指定 1 到 32767 的长度");
         }
-        if (type.equals("DECIMAL")) {
-            if (column.length() == null || column.length() < 1 || column.length() > 38) throw new RpcException("INVALID_ARGUMENT", "DECIMAL 精度必须为 1 到 38");
-            if (column.scale() != null && (column.scale() < 0 || column.scale() > column.length())) throw new RpcException("INVALID_ARGUMENT", "DECIMAL 小数位必须在 0 到精度之间");
+        if (PRECISION_TYPES.contains(type)) {
+            if (column.length() == null || column.length() < 1 || column.length() > 38) throw new RpcException("INVALID_ARGUMENT", type + " 精度必须为 1 到 38");
+            if (column.scale() != null && (column.scale() < 0 || column.scale() > column.length())) throw new RpcException("INVALID_ARGUMENT", type + " 小数位必须在 0 到精度之间");
         }
-        if ((type.equals("TIME") || type.equals("TIMESTAMP")) && (column.scale() == null || column.scale() < 0 || column.scale() > 6)) {
+        if (TIME_SCALE_TYPES.contains(type) && (column.scale() == null || column.scale() < 0 || column.scale() > 6)) {
             throw new RpcException("INVALID_ARGUMENT", type + " 小数秒精度必须为 0 到 6");
         }
         if (column.autoIncrement() && !type.equals("INT") && !type.equals("BIGINT")) {
@@ -149,9 +158,11 @@ public final class DmTableDdlBuilder {
     private String columnDefinition(Column column, boolean includeDefault) {
         String type = normalizedType(column.type());
         StringBuilder value = new StringBuilder(q(column.name())).append(' ').append(type);
-        if (type.equals("VARCHAR") || type.equals("CHAR")) value.append('(').append(column.length()).append(')');
-        if (type.equals("DECIMAL")) value.append('(').append(column.length()).append(column.scale() == null ? "" : "," + column.scale()).append(')');
-        if (type.equals("TIME") || type.equals("TIMESTAMP")) value.append('(').append(column.scale()).append(')');
+        if (LENGTH_TYPES.contains(type)) value.append('(').append(column.length()).append(')');
+        if (PRECISION_TYPES.contains(type)) value.append('(').append(column.length()).append(column.scale() == null ? "" : "," + column.scale()).append(')');
+        if (type.equals("TIME WITH TIME ZONE")) value = new StringBuilder(q(column.name())).append(" TIME(").append(column.scale()).append(") WITH TIME ZONE");
+        else if (type.equals("TIMESTAMP WITH TIME ZONE")) value = new StringBuilder(q(column.name())).append(" TIMESTAMP(").append(column.scale()).append(") WITH TIME ZONE");
+        else if (TIME_SCALE_TYPES.contains(type)) value.append('(').append(column.scale()).append(')');
         if (column.autoIncrement()) value.append(" AUTO_INCREMENT");
         if (includeDefault && !normalizedDefault(column.defaultExpression()).isEmpty()) value.append(" DEFAULT ").append(normalizedDefault(column.defaultExpression()));
         if (!column.nullable() || column.primaryKey()) value.append(" NOT NULL");

@@ -9,5 +9,7 @@ public record ColumnInfo(
         boolean nullable,
         String defaultValue,
         boolean autoIncrement,
-        String remarks) {
+        String remarks,
+        boolean safelyEditable,
+        String editWarning) {
 }

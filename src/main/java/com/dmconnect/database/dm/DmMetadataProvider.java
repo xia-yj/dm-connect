@@ -149,7 +149,9 @@ final class DmMetadataProvider implements MetadataProvider {
                         rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
                         rs.getString("COLUMN_DEF"),
                         "YES".equalsIgnoreCase(autoIncrement),
-                        rs.getString("REMARKS")));
+                        rs.getString("REMARKS"),
+                        true,
+                        ""));
             }
         }
         columns.sort(Comparator.comparingInt(ColumnInfo::ordinal));

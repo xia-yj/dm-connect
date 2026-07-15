@@ -17,10 +17,11 @@ interface DataGridProps {
   table: ResultTable;
   rowOffset?: number;
   onEditCell?: (rowIndex: number, column: ColumnMetadata, value: string | null) => void;
+  isColumnEditable?: (column: ColumnMetadata) => boolean;
   editedCellKeys?: Set<string>;
 }
 
-export function DataGrid({ table, rowOffset = 0, onEditCell, editedCellKeys = new Set() }: DataGridProps) {
+export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = () => true, editedCellKeys = new Set() }: DataGridProps) {
   const [editing, setEditing] = useState<{ rowIndex: number; columnIndex: number; value: string } | null>(null);
   const selectedCellRef = useRef<HTMLTableCellElement | null>(null);
 
@@ -46,8 +47,9 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, editedCellKeys = ne
             {table.rows.map((row, rowIndex) => <tr key={rowIndex}><td className="row-number">{rowOffset + rowIndex + 1}</td>{row.map((value, columnIndex) => {
               const isEditing = editing?.rowIndex === rowIndex && editing.columnIndex === columnIndex;
               const cellKey = `${rowIndex}:${columnIndex}`;
-              return <td key={columnIndex} className={`${onEditCell ? "editable-cell" : ""}${editedCellKeys.has(cellKey) ? " edited-cell" : ""}`} title={onEditCell ? "双击编辑" : (value == null ? "NULL" : displayValue(value))} onClick={event => selectCell(event.currentTarget)} onDoubleClick={() => {
-                if (onEditCell) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
+              const editable = Boolean(onEditCell) && isColumnEditable(table.columns[columnIndex]);
+              return <td key={columnIndex} className={`${editable ? "editable-cell" : ""}${editedCellKeys.has(cellKey) ? " edited-cell" : ""}`} title={editable ? "双击编辑" : (value == null ? "NULL" : displayValue(value))} onClick={event => selectCell(event.currentTarget)} onDoubleClick={() => {
+                if (editable) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
               }}>
                 {isEditing
                   ? <input className="grid-cell-editor" autoFocus value={editing.value} onChange={event => setEditing({ ...editing, value: event.target.value })} onKeyDown={event => { if (event.key === "Enter") commitEdit(); if (event.key === "Escape") setEditing(null); }} onBlur={commitEdit} />

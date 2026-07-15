@@ -16,6 +16,12 @@ function displayColumnType(column: ColumnInfo) {
   return `${column.typeName}${column.size > 0 ? `(${column.size}${column.scale > 0 ? `,${column.scale}` : ""})` : ""}`;
 }
 
+function previewColumnEditable(column: ColumnInfo | undefined): boolean {
+  if (!column || column.autoIncrement) return false;
+  if (column.safelyEditable === false && /生成列|不可见列/.test(column.editWarning ?? "")) return false;
+  return !/^(?:BINARY|VARBINARY|LONGVARBINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB|CLOB|NCLOB|BFILE|IMAGE|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|LONGVARCHAR|LONG|JSON|GEOMETRY|POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)$/.test(column.typeName.toUpperCase());
+}
+
 interface ObjectViewProps {
   result: ObjectLoadResult;
   onLoadPreview: (page: number, filter: PreviewFilter) => Promise<PagedResultTable>;
@@ -176,7 +182,7 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
       {(onExportInsert || onExportCsv) && <span className="insert-export-actions"><select value={insertScope} onChange={event => setInsertScope(event.target.value as "CURRENT_PAGE" | "ALL")} aria-label="导出范围"><option value="CURRENT_PAGE">当前页</option><option value="ALL">全部数据</option></select>{onExportCsv && <button className="button secondary compact" disabled={exportingInsert} onClick={() => void exportCsv()}><Download size={14} />导出 CSV</button>}{onExportInsert && <button className="button secondary compact" disabled={exportingInsert} onClick={() => void exportInsert()}><Download size={14} />{exportingInsert ? "导出中…" : "导出 INSERT"}</button>}</span>}
     </div>
     {previewError && <div className="preview-error">{previewError}</div>}
-    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} rowOffset={(preview.page - 1) * preview.pageSize} onEditCell={primaryKeyColumns.length > 0 ? (rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value) : undefined} editedCellKeys={new Set(Object.keys(pendingEdits))} />
+    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} rowOffset={(preview.page - 1) * preview.pageSize} onEditCell={primaryKeyColumns.length > 0 ? (rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value) : undefined} isColumnEditable={column => !primaryKeyColumns.some(key => key.toLowerCase() === column.name.toLowerCase() || key.toLowerCase() === column.label.toLowerCase()) && previewColumnEditable(result.details?.columns.find(item => item.name.toLowerCase() === column.name.toLowerCase() || item.name.toLowerCase() === column.label.toLowerCase()))} editedCellKeys={new Set(Object.keys(pendingEdits))} />
     {saveError && <div className="grid-edit-error">{saveError}</div>}
     <div className="preview-pagination">
       <span>共 {preview.totalRows} 条 · 每页 {preview.pageSize} 条</span>

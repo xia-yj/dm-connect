@@ -5,6 +5,8 @@ import com.dmconnect.model.DatabaseObject;
 import com.dmconnect.model.PreviewFilter;
 
 import java.io.BufferedWriter;
+import java.io.InputStream;
+import java.io.Reader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,17 +17,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Blob;
+import java.sql.Clob;
+import java.sql.Types;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 
-/** Streams DM INSERT statements to a UTF-8 SQL file, excluding auto-increment columns. */
+/** Streams database-specific INSERT statements to a UTF-8 SQL file. */
 public final class InsertSqlExporter {
     private InsertSqlExporter() { }
 
     public static long write(Connection connection, DatabaseAdapter adapter, DatabaseObject table, PreviewFilter filter,
                              int offset, int maxRows, Path target) throws Exception {
-        List<String> columns = writableColumns(connection.getMetaData(), table);
+        List<String> columns = writableColumns(connection.getMetaData(), adapter, table);
         if (columns.isEmpty()) throw new SQLException("该表仅包含自增字段，无法导出 INSERT 语句");
         String source = adapter.quoteIdentifier(table.schema()) + "." + adapter.quoteIdentifier(table.name());
         String where = filter == null ? "" : " WHERE " + filter.conditions().stream()
@@ -35,6 +39,7 @@ public final class InsertSqlExporter {
         Files.createDirectories(target.toAbsolutePath().getParent());
         long written = 0;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            adapter.configureStreaming(statement);
             bindFilter(statement, filter);
             if (maxRows > 0) statement.setMaxRows(offset + maxRows + 1);
             try (ResultSet rows = statement.executeQuery(); BufferedWriter writer = Files.newBufferedWriter(target, StandardCharsets.UTF_8)) {
@@ -46,7 +51,7 @@ public final class InsertSqlExporter {
                     writer.write(insertPrefix);
                     for (int index = 1; index <= columns.size(); index++) {
                         if (index > 1) writer.write(", ");
-                        writer.write(literal(rows.getObject(index), metadata.getColumnType(index)));
+                        writeLiteral(writer, rows, metadata, index, adapter);
                     }
                     writer.write(");");
                     writer.newLine();
@@ -57,12 +62,30 @@ public final class InsertSqlExporter {
         return written;
     }
 
-    private static List<String> writableColumns(DatabaseMetaData metadata, DatabaseObject table) throws SQLException {
+    private static List<String> writableColumns(DatabaseMetaData metadata, DatabaseAdapter adapter, DatabaseObject table) throws SQLException {
         List<String> columns = new ArrayList<>();
-        try (ResultSet rows = metadata.getColumns(null, table.schema(), table.name(), "%")) {
-            while (rows.next()) if (!"YES".equalsIgnoreCase(rows.getString("IS_AUTOINCREMENT"))) columns.add(rows.getString("COLUMN_NAME"));
+        try (ResultSet rows = metadata.getColumns(adapter.metadataCatalog(table.schema()), adapter.metadataSchema(table.schema()), table.name(), "%")) {
+            while (rows.next()) {
+                boolean generated = false;
+                try {
+                    generated = "YES".equalsIgnoreCase(rows.getString("IS_GENERATEDCOLUMN"));
+                } catch (SQLException ignored) {
+                    // Older JDBC drivers may not expose generated-column metadata.
+                }
+                boolean autoIncrement = "YES".equalsIgnoreCase(rows.getString("IS_AUTOINCREMENT"));
+                if (isWritableColumn(adapter.id(), generated, autoIncrement)) {
+                    columns.add(rows.getString("COLUMN_NAME"));
+                }
+            }
         }
         return columns;
+    }
+
+    static boolean isWritableColumn(String databaseType, boolean generated, boolean autoIncrement) {
+        if (generated) return false;
+        // MySQL accepts explicit AUTO_INCREMENT values. Keeping them is essential for a
+        // restorable export because those values are commonly referenced by foreign keys.
+        return "mysql".equalsIgnoreCase(databaseType) || !autoIncrement;
     }
 
     private static void bindFilter(PreparedStatement statement, PreviewFilter filter) throws SQLException {
@@ -70,10 +93,61 @@ public final class InsertSqlExporter {
         for (int index = 0; index < filter.conditions().size(); index++) statement.setString(index + 1, filter.conditions().get(index).value());
     }
 
-    private static String literal(Object value, int jdbcType) {
-        if (value == null) return "NULL";
-        if (value instanceof Number || value instanceof BigDecimal) return value.toString();
-        if (value instanceof byte[] bytes) return "X'" + HexFormat.of().formatHex(bytes) + "'";
-        return "'" + value.toString().replace("'", "''") + "'";
+    private static void writeLiteral(BufferedWriter writer, ResultSet rows, ResultSetMetaData metadata,
+                                     int index, DatabaseAdapter adapter) throws Exception {
+        if (JdbcValuePolicy.preserveTemporalText(metadata.getColumnTypeName(index))) {
+            writer.write(adapter.stringLiteral(rows.getString(index)));
+            return;
+        }
+        int jdbcType = metadata.getColumnType(index);
+        if (jdbcType == Types.BINARY || jdbcType == Types.VARBINARY
+                || jdbcType == Types.LONGVARBINARY || jdbcType == Types.BLOB) {
+            try (InputStream input = rows.getBinaryStream(index)) {
+                if (input == null) writer.write("NULL");
+                else {
+                    writer.write("X'");
+                    JdbcStreamWriter.writeHex(writer, input);
+                    writer.write('\'');
+                }
+            }
+            return;
+        }
+        if (jdbcType == Types.CLOB || jdbcType == Types.NCLOB
+                || jdbcType == Types.LONGVARCHAR || jdbcType == Types.LONGNVARCHAR) {
+            try (Reader reader = rows.getCharacterStream(index)) {
+                if (reader == null) writer.write("NULL");
+                else JdbcStreamWriter.writeSqlTextLiteral(writer, reader, adapter);
+            }
+            return;
+        }
+        Object value = rows.getObject(index);
+        if (value == null) { writer.write("NULL"); return; }
+        if (value instanceof Boolean bool) { writer.write(bool ? "1" : "0"); return; }
+        if (value instanceof Number || value instanceof BigDecimal) { writer.write(value.toString()); return; }
+        if (value instanceof Blob blob) {
+            try (InputStream input = blob.getBinaryStream()) {
+                writer.write("X'");
+                JdbcStreamWriter.writeHex(writer, input);
+                writer.write('\'');
+            } finally {
+                try { blob.free(); } catch (SQLException ignored) { }
+            }
+            return;
+        }
+        if (value instanceof Clob clob) {
+            try (Reader reader = clob.getCharacterStream()) {
+                JdbcStreamWriter.writeSqlTextLiteral(writer, reader, adapter);
+            } finally {
+                try { clob.free(); } catch (SQLException ignored) { }
+            }
+            return;
+        }
+        if (value instanceof byte[] bytes) {
+            writer.write("X'");
+            JdbcStreamWriter.writeHex(writer, bytes);
+            writer.write('\'');
+            return;
+        }
+        writer.write(adapter.stringLiteral(value.toString()));
     }
 }

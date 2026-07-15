@@ -162,7 +162,7 @@ function registerIpc(): void {
   ipcMain.handle("dialog:select-driver", async event => {
     if (!trustedUrl(event.senderFrame?.url ?? "")) return null;
     const selected = await dialog.showOpenDialog(mainWindow!, {
-      title: "导入达梦 JDBC 驱动",
+      title: "导入 JDBC 驱动",
       properties: ["openFile"],
       filters: [{ name: "JDBC JAR", extensions: ["jar"] }]
     });

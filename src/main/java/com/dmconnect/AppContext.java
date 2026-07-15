@@ -3,6 +3,7 @@ package com.dmconnect;
 import com.dmconnect.connection.ConnectionService;
 import com.dmconnect.connection.DriverManagerService;
 import com.dmconnect.database.dm.DmDatabaseAdapter;
+import com.dmconnect.database.mysql.MySqlDatabaseAdapter;
 import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.persistence.AppPaths;
 import com.dmconnect.persistence.JsonStore;
@@ -11,6 +12,8 @@ import com.dmconnect.security.VaultService;
 import com.dmconnect.security.VaultException;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -22,7 +25,7 @@ public final class AppContext implements AutoCloseable {
     private final ProfileRepository profiles;
     private final VaultService vault;
     private final DriverManagerService drivers;
-    private final DatabaseAdapter databaseAdapter;
+    private final Map<String, DatabaseAdapter> databaseAdapters;
     private final ConnectionService connections;
     private final ExecutorService executor;
 
@@ -34,8 +37,13 @@ public final class AppContext implements AutoCloseable {
         vault = new VaultService(paths, jsonStore);
         vault.open();
         drivers = new DriverManagerService(paths, jsonStore);
-        databaseAdapter = new DmDatabaseAdapter();
-        connections = new ConnectionService(databaseAdapter, drivers);
+        Map<String, DatabaseAdapter> adapters = new LinkedHashMap<>();
+        DatabaseAdapter dm = new DmDatabaseAdapter();
+        DatabaseAdapter mysql = new MySqlDatabaseAdapter();
+        adapters.put(dm.id(), dm);
+        adapters.put(mysql.id(), mysql);
+        databaseAdapters = Map.copyOf(adapters);
+        connections = new ConnectionService(databaseAdapters, drivers);
         AtomicInteger counter = new AtomicInteger();
         ThreadFactory factory = runnable -> {
             Thread thread = new Thread(runnable, "dm-connect-worker-" + counter.incrementAndGet());
@@ -62,7 +70,17 @@ public final class AppContext implements AutoCloseable {
     }
 
     public DatabaseAdapter databaseAdapter() {
-        return databaseAdapter;
+        return databaseAdapter("dm");
+    }
+
+    public DatabaseAdapter databaseAdapter(String databaseType) {
+        DatabaseAdapter adapter = databaseAdapters.get(databaseType);
+        if (adapter == null) throw new IllegalArgumentException("当前版本不支持数据库类型：" + databaseType);
+        return adapter;
+    }
+
+    public Map<String, DatabaseAdapter> databaseAdapters() {
+        return databaseAdapters;
     }
 
     public ConnectionService connections() {

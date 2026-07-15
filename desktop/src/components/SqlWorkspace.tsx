@@ -6,7 +6,8 @@ import {
   LoaderCircle, Play, PlayCircle, RotateCcw, Rows3, Save, TerminalSquare
 } from "lucide-react";
 import { asRpcError, errorMessage, rpc } from "../api";
-import type { DatabaseObject, ExecutionResult, ObjectLoadResult, PagedResultTable, QueryStatus, StatementOutcome } from "../types";
+import { sqlDialectConfig } from "../sqlDialect";
+import type { DatabaseObject, DatabaseType, ExecutionResult, ObjectLoadResult, PagedResultTable, QueryStatus, StatementOutcome } from "../types";
 import { DataGrid } from "./DataGrid";
 import { ConfirmModal } from "./Modal";
 import { ObjectView } from "./ObjectView";
@@ -16,6 +17,7 @@ interface SqlWorkspaceProps {
   sessionId: string;
   profileName: string;
   profileId: string;
+  databaseType: DatabaseType;
   schemas: string[];
   tableSuggestions: DatabaseObject[];
   initialSql?: string;
@@ -24,18 +26,8 @@ interface SqlWorkspaceProps {
 type ExecuteMode = "SELECTION" | "CURRENT_STATEMENT" | "SCRIPT";
 type ColumnSuggestion = { schema: string; table: string; name: string; typeName: string; remarks: string | null };
 
-const SQL_KEYWORDS = ["SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "ON", "GROUP BY", "ORDER BY", "HAVING", "INSERT INTO", "VALUES", "UPDATE", "SET", "DELETE FROM", "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "WITH", "UNION", "DISTINCT", "AS", "CASE", "WHEN", "THEN", "ELSE", "END", "LIMIT", "OFFSET", "COMMIT", "ROLLBACK"];
-const SQL_FUNCTIONS = ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NVL", "NULLIF", "CAST", "SUBSTR", "LENGTH", "LOWER", "UPPER", "CURRENT_TIMESTAMP", "SYSDATE"];
-const SQL_SNIPPETS = [
-  { label: "sel", detail: "标准查询", insertText: "SELECT * FROM" },
-  { label: "selw", detail: "带条件查询", insertText: "SELECT ${1:*}\nFROM ${2:table_name}\nWHERE ${3:condition};" },
-  { label: "ins", detail: "插入数据", insertText: "INSERT INTO ${1:table_name} (${2:column_name})\nVALUES (${3:value});" },
-  { label: "upd", detail: "更新数据", insertText: "UPDATE ${1:table_name}\nSET ${2:column_name} = ${3:value}\nWHERE ${4:condition};" },
-  { label: "del", detail: "删除数据", insertText: "DELETE FROM ${1:table_name}\nWHERE ${2:condition};" },
-  { label: "ct", detail: "创建表", insertText: "CREATE TABLE ${1:table_name} (\n  ${2:id} ${3:BIGINT} PRIMARY KEY\n);" }
-];
-
-export function SqlWorkspace({ sessionId, profileName, profileId, schemas, tableSuggestions, initialSql = "" }: SqlWorkspaceProps) {
+export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, schemas, tableSuggestions, initialSql = "" }: SqlWorkspaceProps) {
+  const dialect = sqlDialectConfig(databaseType);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const completionRef = useRef<{ dispose: () => void } | null>(null);
@@ -130,6 +122,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, schemas, table
     completionRef.current = monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: [".", " "],
       provideCompletionItems: (model: editor.ITextModel, position: Position) => {
+        if (model !== editorRef.current?.getModel()) return { suggestions: [] };
         const word = model.getWordUntilPosition(position);
         const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
         const dynamic = suggestionsRef.current;
@@ -153,11 +146,11 @@ export function SqlWorkspace({ sessionId, profileName, profileId, schemas, table
         const suggestions = schemaMatch
           ? scopedTables.map(table => ({ label: table.name, detail: `${table.schema} · 表`, kind: monaco.languages.CompletionItemKind.Class, insertText: table.name, sortText: `0_${table.name}`, range }))
           : [
-              ...SQL_KEYWORDS.map(label => ({ label, kind: monaco.languages.CompletionItemKind.Keyword, insertText: label, range })),
-              ...SQL_FUNCTIONS.map(label => ({ label, kind: monaco.languages.CompletionItemKind.Function, insertText: `${label}($0)`, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range })),
-              ...SQL_SNIPPETS.map(snippet => ({ label: snippet.label, detail: snippet.detail, documentation: snippet.detail, kind: monaco.languages.CompletionItemKind.Snippet, insertText: snippet.insertText, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, sortText: `0_${snippet.label}`, range })),
+              ...dialect.keywords.map(label => ({ label, kind: monaco.languages.CompletionItemKind.Keyword, insertText: label, range })),
+              ...dialect.functions.map(label => ({ label, kind: monaco.languages.CompletionItemKind.Function, insertText: `${label}($0)`, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range })),
+              ...dialect.snippets.map(snippet => ({ label: snippet.label, detail: snippet.detail, documentation: snippet.detail, kind: monaco.languages.CompletionItemKind.Snippet, insertText: snippet.insertText, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, sortText: `0_${snippet.label}`, range })),
               ...columnItems,
-              ...dynamic.schemas.map(schema => ({ label: schema, detail: "数据库模式", kind: monaco.languages.CompletionItemKind.Module, insertText: schema, range })),
+              ...dynamic.schemas.map(schema => ({ label: schema, detail: dialect.namespaceLabel, kind: monaco.languages.CompletionItemKind.Module, insertText: schema, range })),
               ...scopedTables.flatMap(table => [
                 { label: table.name, detail: `${table.schema} · 表`, kind: monaco.languages.CompletionItemKind.Class, insertText: table.name, range },
                 { label: `${table.schema}.${table.name}`, detail: "完整表名", kind: monaco.languages.CompletionItemKind.Class, insertText: `${table.schema}.${table.name}`, range }
@@ -364,7 +357,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, schemas, table
       </header>
 
       <div className="sql-editor-pane">
-        <div className="editor-context"><span className="connection-badge"><span />{profileName}</span><span className="editor-language">DM SQL</span></div>
+        <div className="editor-context"><span className="connection-badge"><span />{profileName}</span><span className="editor-language">{dialect.label}</span></div>
         <Editor
           height="100%"
           language="sql"

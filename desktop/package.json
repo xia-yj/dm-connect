@@ -2,7 +2,7 @@
   "name": "dm-connect-desktop",
   "version": "2.0.9",
   "private": true,
-  "description": "DM Connect React + Electron desktop client",
+  "description": "DM and MySQL desktop database client built with React and Electron",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",

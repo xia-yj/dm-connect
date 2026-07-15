@@ -44,4 +44,61 @@ class SqlScriptParserTest {
                 .get().extracting(ParsedStatement::sql).isEqualTo("select 2");
     }
 
+    @Test
+    void parsesMySqlBackticksCommentsEscapesAndDelimiterBlocks() {
+        String sql = """
+                # MySQL comment
+                SELECT `semi;column`, 'it\\'s;ok' FROM `order`;
+                DELIMITER $$
+                CREATE PROCEDURE p_test()
+                BEGIN
+                  SELECT 'inside;procedure';
+                END$$
+                DELIMITER ;
+                SELECT 2;
+                """;
+
+        assertThat(parser.split(sql, "mysql")).hasSize(3);
+        assertThat(parser.split(sql, "mysql").get(0)).contains("`semi;column`");
+        assertThat(parser.split(sql, "mysql").get(1)).startsWith("CREATE PROCEDURE").contains("inside;procedure");
+        assertThat(parser.split(sql, "mysql").get(2)).isEqualTo("SELECT 2");
+    }
+
+    @Test
+    void preservesMysqlExecutableCommentsAndRequiresWhitespaceAfterDashCommentMarker() {
+        String sql = """
+                /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+                SELECT 4--2;
+                -- actual comment
+                SELECT 3;
+                """;
+
+        assertThat(parser.split(sql, "mysql")).containsExactly(
+                "/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */",
+                "SELECT 4--2",
+                "-- actual comment\nSELECT 3");
+    }
+
+    @Test
+    void followsMysqlNoBackslashEscapesQuoteSemantics() {
+        String sql = "SELECT 'trailing\\'; SELECT 2;";
+
+        assertThat(parser.split(sql, "mysql", false)).containsExactly(
+                "SELECT 'trailing\\'", "SELECT 2");
+        assertThat(parser.split(sql, "mysql", true)).containsExactly(sql);
+    }
+
+    @Test
+    void followsMysqlAnsiQuotesSemanticsWithoutChangingSingleQuotedStrings() {
+        String doubleQuotedIdentifier = "SELECT \"trailing\\\"; SELECT 2;";
+        String singleQuotedString = "SELECT 'trailing\\'; SELECT 2;";
+
+        assertThat(parser.split(doubleQuotedIdentifier, "mysql", true, true))
+                .containsExactly("SELECT \"trailing\\\"", "SELECT 2");
+        assertThat(parser.split(doubleQuotedIdentifier, "mysql", true, false))
+                .containsExactly(doubleQuotedIdentifier);
+        assertThat(parser.split(singleQuotedString, "mysql", true, true))
+                .containsExactly(singleQuotedString);
+    }
+
 }

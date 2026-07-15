@@ -30,7 +30,9 @@ class BackendServiceTest {
                 Map<?, ?> initial = (Map<?, ?>) service.handle("app.bootstrap", mapper.createObjectNode());
                 assertThat(initial.get("version")).isEqualTo("2.0.0");
                 assertThat(initial.get("profiles")).asList().isEmpty();
-                assertThat(initial.get("drivers")).asList().isEmpty();
+                assertThat(initial.get("drivers")).asList().hasSize(1);
+                Map<?, ?> builtInDriver = (Map<?, ?>) ((java.util.List<?>) initial.get("drivers")).get(0);
+                assertThat(builtInDriver.get("builtIn")).isEqualTo(true);
                 assertThat(initial.containsKey("vault")).isFalse();
                 assertThat(temporary.resolve("vault.json")).exists();
                 assertThat(temporary.resolve("vault.key")).exists();

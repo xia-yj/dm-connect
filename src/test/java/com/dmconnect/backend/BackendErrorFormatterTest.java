@@ -22,9 +22,9 @@ class BackendErrorFormatterTest {
 
     @Test
     void redactsPasswordsFromDriverMessages() {
-        SQLException error = new SQLException("password=secret-value pwd:another-secret password2=second clientCertificateKeyStorePassword=store-secret");
+        SQLException error = new SQLException("password=secret-value pwd:another-secret password2=second clientCertificateKeyStorePassword=store-secret accessToken=token-value clientSecret=client-value");
         assertThat(BackendErrorFormatter.format(error))
                 .doesNotContain("secret-value", "another-secret", "second", "store-secret")
-                .contains("password=***", "pwd:***", "password2=***", "clientCertificateKeyStorePassword=***");
+                .contains("password=***", "pwd:***", "password2=***", "clientCertificateKeyStorePassword=***", "accessToken=***", "clientSecret=***");
     }
 }

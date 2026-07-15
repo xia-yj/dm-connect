@@ -24,7 +24,7 @@ Copy-Item (Join-Path $root "target/dm-connect-$version.jar") (Join-Path $backend
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & (Join-Path $env:JAVA_HOME "bin/jlink.exe") `
-  "--add-modules" "java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.sql.rowset,java.transaction.xa,java.xml,java.xml.crypto,jdk.charsets,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported" `
+  "--add-modules" "java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.sql.rowset,java.transaction.xa,java.xml,java.xml.crypto,jdk.charsets,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.security.auth,jdk.unsupported" `
   "--strip-debug" "--no-header-files" "--no-man-pages" "--compress=2" "--include-locales=en,zh" `
   "--output" (Join-Path $backend "runtime")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

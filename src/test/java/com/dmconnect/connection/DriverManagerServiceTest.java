@@ -67,6 +67,25 @@ class DriverManagerServiceTest {
         }
     }
 
+    @Test
+    void exposesAndInstantiatesEveryBuiltInJdbcDriver() throws Exception {
+        AppPaths paths = new AppPaths(temporary.resolve("builtin-data"), temporary.resolve("builtin-data/drivers"),
+                temporary.resolve("builtin-data/profiles.json"), temporary.resolve("builtin-data/drivers.json"),
+                temporary.resolve("builtin-data/vault.json"));
+        paths.initialize();
+        try (DriverManagerService service = new DriverManagerService(paths, new JsonStore())) {
+            assertThat(service.findAll()).extracting(driver -> driver.driverClass()).containsExactlyInAnyOrder(
+                    "com.mysql.cj.jdbc.Driver", "org.postgresql.Driver",
+                    "com.microsoft.sqlserver.jdbc.SQLServerDriver", "org.sqlite.JDBC");
+            assertThat(service.driver(DriverManagerService.BUILT_IN_POSTGRESQL_DRIVER_ID))
+                    .isInstanceOf(org.postgresql.Driver.class);
+            assertThat(service.driver(DriverManagerService.BUILT_IN_SQLSERVER_DRIVER_ID))
+                    .isInstanceOf(com.microsoft.sqlserver.jdbc.SQLServerDriver.class);
+            assertThat(service.driver(DriverManagerService.BUILT_IN_SQLITE_DRIVER_ID))
+                    .isInstanceOf(org.sqlite.JDBC.class);
+        }
+    }
+
     private Path buildDriverJar() throws Exception {
         Path jar = temporary.resolve("DmJdbcDriver.jar");
         String resource = "/dm/jdbc/driver/DmDriver.class";

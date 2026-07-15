@@ -65,7 +65,13 @@ const DIALECTS: Record<DatabaseType, Omit<SqlDialectConfig, "keywords" | "functi
         insertText: "INSERT INTO ${1:table_name} (${2:column_name})\nVALUES (${3:value}) AS new\nON DUPLICATE KEY UPDATE ${2:column_name} = new.${2:column_name};"
       }
     ]
-  }
+  },
+  mongo: { label: "MongoDB 文档", namespaceLabel: "数据库", keywords: [], functions: [], snippets: [] },
+  redis: { label: "Redis 命令", namespaceLabel: "逻辑库", keywords: [], functions: [], snippets: [] },
+  postgresql: { label: "PostgreSQL SQL", namespaceLabel: "模式", keywords: [], functions: [], snippets: [] },
+  oracle: { label: "Oracle SQL", namespaceLabel: "模式", keywords: [], functions: [], snippets: [] },
+  sqlserver: { label: "SQL Server SQL", namespaceLabel: "模式", keywords: [], functions: [], snippets: [] },
+  sqlite: { label: "SQLite SQL", namespaceLabel: "数据库", keywords: [], functions: [], snippets: [] }
 };
 
 export function sqlDialectConfig(databaseType: DatabaseType): SqlDialectConfig {

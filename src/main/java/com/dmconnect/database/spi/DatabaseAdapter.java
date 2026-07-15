@@ -8,7 +8,12 @@ public interface DatabaseAdapter {
     static boolean isSensitiveProperty(String key) {
         if (key == null) return false;
         String normalized = key.strip().toLowerCase(java.util.Locale.ROOT);
-        return normalized.equals("user") || normalized.contains("password") || normalized.equals("passwd") || normalized.equals("pwd");
+        String compact = normalized.replaceAll("[^a-z0-9]", "");
+        return normalized.equals("user") || normalized.equals("username")
+                || normalized.contains("password") || normalized.equals("passwd") || normalized.equals("pwd")
+                || normalized.contains("token") || normalized.contains("secret")
+                || normalized.contains("credential") || normalized.contains("passphrase")
+                || compact.contains("privatekey") || compact.contains("apikey");
     }
 
     String id();
@@ -23,6 +28,11 @@ public interface DatabaseAdapter {
 
     default String buildJdbcUrl(String host, int port, String database, Map<String, String> advancedProperties) {
         return buildJdbcUrl(host, port, advancedProperties);
+    }
+
+    /** Advanced values that must be supplied through Driver.connect rather than embedded in a URL. */
+    default Map<String, String> connectionProperties(Map<String, String> advancedProperties) {
+        return Map.of();
     }
 
     String quoteIdentifier(String identifier);

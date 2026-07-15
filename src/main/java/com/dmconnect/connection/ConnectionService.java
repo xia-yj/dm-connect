@@ -61,6 +61,8 @@ public final class ConnectionService implements AutoCloseable {
             future.cancel(true);
             throw new SQLTimeoutException("连接超时（" + timeout.toSeconds() + " 秒）");
         } catch (InterruptedException exception) {
+            expired.set(true);
+            future.cancel(true);
             Thread.currentThread().interrupt();
             throw new SQLException("连接过程被中断", exception);
         } catch (ExecutionException exception) {
@@ -88,8 +90,9 @@ public final class ConnectionService implements AutoCloseable {
         Driver driver = drivers.driver(profile.driverId());
         String url = adapter.buildJdbcUrl(profile.host(), profile.port(), profile.database(), profile.advancedProperties());
         Properties properties = new Properties();
-        properties.setProperty("user", profile.username());
-        properties.setProperty("password", new String(password));
+        adapter.connectionProperties(profile.advancedProperties()).forEach(properties::setProperty);
+        if (!profile.username().isBlank()) properties.setProperty("user", profile.username());
+        if (password.length > 0) properties.setProperty("password", new String(password));
         try {
             Connection connection = driver.connect(url, properties);
             if (connection == null) throw new SQLException("JDBC 驱动不接受连接地址：" + url);

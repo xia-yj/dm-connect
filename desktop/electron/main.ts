@@ -15,6 +15,7 @@ const allowedMethods = new Set([
   "app.bootstrap", "app.ping", "storage.reset",
   "driver.list", "driver.import", "profile.list", "profile.save", "profile.copy", "profile.delete", "profile.test",
   "connection.connect", "connection.disconnect", "connection.schemas", "objects.list", "object.load", "object.preview", "object.updateCell", "object.updateCells",
+  "mongo.collections", "mongo.documents", "mongo.insert", "mongo.replace", "mongo.delete", "redis.keys", "redis.key", "redis.command",
   "table.create", "table.alter", "table.longRowStatus", "table.setLongRow",
   "query.open", "query.status", "query.execute", "query.cancel", "query.autoCommit", "query.commit", "query.rollback", "query.close",
   "history.list", "history.delete", "history.clear", "csv.export", "table.exportInsert", "table.exportCsv"
@@ -168,6 +169,27 @@ function registerIpc(): void {
       filters: [{ name: "JDBC JAR", extensions: ["jar"] }]
     });
     return selected.canceled ? null : selected.filePaths[0] ?? null;
+  });
+  ipcMain.handle("dialog:select-database-file", async event => {
+    if (!trustedUrl(event.senderFrame?.url ?? "")) return null;
+    const selected = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择 SQLite 数据库文件",
+      properties: ["openFile"],
+      filters: [
+        { name: "SQLite 数据库", extensions: ["db", "sqlite", "sqlite3"] },
+        { name: "所有文件", extensions: ["*"] }
+      ]
+    });
+    return selected.canceled ? null : selected.filePaths[0] ?? null;
+  });
+  ipcMain.handle("dialog:create-database-file", async event => {
+    if (!trustedUrl(event.senderFrame?.url ?? "")) return null;
+    const selected = await dialog.showSaveDialog(mainWindow!, {
+      title: "新建 SQLite 数据库文件",
+      defaultPath: "database.sqlite",
+      filters: [{ name: "SQLite 数据库", extensions: ["sqlite", "db", "sqlite3"] }]
+    });
+    return selected.canceled ? null : selected.filePath ?? null;
   });
   ipcMain.handle("dialog:save-csv", async (event, defaultName: string) => {
     if (!trustedUrl(event.senderFrame?.url ?? "")) return null;

@@ -8,7 +8,7 @@
     <artifactId>dm-connect</artifactId>
     <version>2.0.6</version>
     <name>DM Connect</name>
-    <description>支持达梦数据库与 MySQL 的轻量桌面连接与 SQL 工具</description>
+    <description>支持多种关系型与原生数据库的轻量桌面连接与查询工具</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -18,6 +18,12 @@
         <jackson.version>2.18.3</jackson.version>
         <junit.version>5.11.4</junit.version>
         <mysql.connector.version>8.3.0</mysql.connector.version>
+        <mongodb.driver.version>5.2.1</mongodb.driver.version>
+        <lettuce.version>6.5.4.RELEASE</lettuce.version>
+        <fst.version>2.48</fst.version>
+        <postgresql.version>42.7.5</postgresql.version>
+        <sqlserver.version>12.8.1.jre11</sqlserver.version>
+        <sqlite.version>3.47.1.0</sqlite.version>
     </properties>
 
     <dependencies>
@@ -52,6 +58,24 @@
             <artifactId>mysql-connector-j</artifactId>
             <version>${mysql.connector.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+            <version>${mongodb.driver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+            <version>${lettuce.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>de.ruedigermoeller</groupId>
+            <artifactId>fst</artifactId>
+            <version>${fst.version}</version>
+        </dependency>
+        <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>${postgresql.version}</version></dependency>
+        <dependency><groupId>com.microsoft.sqlserver</groupId><artifactId>mssql-jdbc</artifactId><version>${sqlserver.version}</version></dependency>
+        <dependency><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId><version>${sqlite.version}</version></dependency>
 
         <dependency>
             <groupId>org.junit.jupiter</groupId>

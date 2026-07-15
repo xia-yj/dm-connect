@@ -23,7 +23,7 @@ mvn -q dependency:copy-dependencies \
   -DoutputDirectory="$BACKEND/app/lib"
 
 jlink \
-  --add-modules java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.sql.rowset,java.transaction.xa,java.xml,java.xml.crypto,jdk.charsets,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.unsupported \
+  --add-modules java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.sql.rowset,java.transaction.xa,java.xml,java.xml.crypto,jdk.charsets,jdk.crypto.cryptoki,jdk.crypto.ec,jdk.localedata,jdk.security.auth,jdk.unsupported \
   --strip-debug \
   --no-header-files \
   --no-man-pages \

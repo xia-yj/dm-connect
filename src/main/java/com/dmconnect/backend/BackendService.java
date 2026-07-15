@@ -4,6 +4,10 @@ import com.dmconnect.AppContext;
 import com.dmconnect.database.dm.DmTableDdlBuilder;
 import com.dmconnect.database.mysql.MySqlTableDdlBuilder;
 import com.dmconnect.database.spi.DatabaseAdapter;
+import com.dmconnect.nativeclient.MongoWorkspace;
+import com.dmconnect.nativeclient.NativeWorkspace;
+import com.dmconnect.nativeclient.RedisCommandExecutor;
+import com.dmconnect.nativeclient.RedisWorkspace;
 import com.dmconnect.model.ConnectionProfile;
 import com.dmconnect.model.DatabaseObject;
 import com.dmconnect.model.DatabaseObjectKind;
@@ -43,6 +47,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.bson.Document;
+import io.lettuce.core.KeyScanCursor;
 
 public final class BackendService implements AutoCloseable {
     public static final String VERSION = "2.0.0";
@@ -50,6 +56,7 @@ public final class BackendService implements AutoCloseable {
     private final AppContext context;
     private final ObjectMapper mapper;
     private final Map<String, BackendWorkspace> workspaces = new ConcurrentHashMap<>();
+    private final Map<String, NativeWorkspace> nativeWorkspaces = new ConcurrentHashMap<>();
     private final Map<String, BackendQuery> queries = new ConcurrentHashMap<>();
     private final SqlScriptParser parser = new SqlScriptParser();
     private final DangerousSqlDetector dangerousSqlDetector = new DangerousSqlDetector();
@@ -75,6 +82,14 @@ public final class BackendService implements AutoCloseable {
             case "connection.connect" -> connect(safeParams);
             case "connection.disconnect" -> disconnect(requiredText(safeParams, "profileId"));
             case "connection.schemas" -> schemas(requiredText(safeParams, "profileId"));
+            case "mongo.collections" -> mongoCollections(safeParams);
+            case "mongo.documents" -> mongoDocuments(safeParams);
+            case "mongo.insert" -> mongoInsert(safeParams);
+            case "mongo.replace" -> mongoReplace(safeParams);
+            case "mongo.delete" -> mongoDelete(safeParams);
+            case "redis.keys" -> redisKeys(safeParams);
+            case "redis.key" -> redisKey(safeParams);
+            case "redis.command" -> redisCommand(safeParams);
             case "objects.list" -> listObjects(safeParams);
             case "table.create" -> createTable(safeParams);
             case "table.alter" -> alterTable(safeParams);
@@ -110,7 +125,9 @@ public final class BackendService implements AutoCloseable {
         result.put("databaseTypes", context.databaseAdapters().values().stream()
                 .map(adapter -> Map.of("id", adapter.id(), "displayName", adapter.displayName(), "defaultPort", adapter.defaultPort(), "driverClass", adapter.driverClassName()))
                 .toList());
-        result.put("connectedProfileIds", List.copyOf(workspaces.keySet()));
+        Set<String> connectedProfileIds = new java.util.LinkedHashSet<>(workspaces.keySet());
+        connectedProfileIds.addAll(nativeWorkspaces.keySet());
+        result.put("connectedProfileIds", List.copyOf(connectedProfileIds));
         context.vault().legacyBackup().ifPresent(path ->
                 result.put("legacyVaultBackup", path.toAbsolutePath().toString()));
         return result;
@@ -167,7 +184,7 @@ public final class BackendService implements AutoCloseable {
         result.put("driverId", profile.driverId());
         result.put("advancedProperties", profile.advancedProperties());
         result.put("rememberPassword", profile.rememberPassword());
-        result.put("connected", workspaces.containsKey(profile.id()));
+        result.put("connected", workspaces.containsKey(profile.id()) || nativeWorkspaces.containsKey(profile.id()));
         result.put("hasSavedPassword", hasSavedPassword(profile.id()));
         return result;
     }
@@ -184,13 +201,19 @@ public final class BackendService implements AutoCloseable {
     private Object saveProfile(JsonNode params) throws Exception {
         ConnectionProfile profile = profileFrom(params);
         String password = params.path("password").asText("");
+        boolean databaseTypeChanged = context.profiles().findById(profile.id())
+                .map(existing -> !existing.databaseType().equals(profile.databaseType()))
+                .orElse(false);
         BackendWorkspace old = workspaces.remove(profile.id());
         if (old != null) old.close();
+        NativeWorkspace nativeOld = nativeWorkspaces.remove(profile.id());
+        if (nativeOld != null) nativeOld.close();
         closeQueries(profile.id());
         context.profiles().save(profile);
-        if (!profile.rememberPassword()) {
+        if (!profile.rememberPassword() || databaseTypeChanged) {
             context.vault().removeSecret(profile.id());
-        } else if (!password.isEmpty()) {
+        }
+        if (profile.rememberPassword() && !password.isEmpty()) {
             char[] value = password.toCharArray();
             try {
                 context.vault().putSecret(profile.id(), value);
@@ -228,7 +251,14 @@ public final class BackendService implements AutoCloseable {
         ConnectionProfile profile = profileFrom(params);
         char[] password = passwordFor(profile, params.path("password").asText(""));
         try {
-            context.connections().testConnection(profile, password);
+            if (isNative(profile)) {
+                NativeWorkspace workspace = openNativeWorkspace(profile, password);
+                try {
+                    workspace.verify();
+                } finally {
+                    workspace.close();
+                }
+            } else context.connections().testConnection(profile, password);
             return Map.of("success", true);
         } finally {
             Arrays.fill(password, '\0');
@@ -238,6 +268,19 @@ public final class BackendService implements AutoCloseable {
     private Object connect(JsonNode params) throws Exception {
         String profileId = requiredText(params, "profileId");
         ConnectionProfile profile = requireProfile(profileId);
+        if (isNative(profile)) {
+            String suppliedPassword = params.path("password").asText("");
+            try {
+                return connectNative(profileId, profile, suppliedPassword);
+            } catch (Exception exception) {
+                if (profile.databaseType().equals("redis") && suppliedPassword.isEmpty()
+                        && redisAuthenticationFailed(exception)) {
+                    throw new RpcException("PASSWORD_REQUIRED", "请输入 Redis 密码",
+                            Map.of("profileId", profile.id(), "profileName", profile.name()));
+                }
+                throw exception;
+            }
+        }
         BackendWorkspace existing = workspaces.get(profileId);
         if (existing != null) {
             return Map.of("profile", profileView(profile), "schemas", schemas(profileId));
@@ -259,6 +302,7 @@ public final class BackendService implements AutoCloseable {
         if (supplied != null && !supplied.isEmpty()) return supplied.toCharArray();
         Optional<char[]> stored = context.vault().getSecret(profile.id());
         if (stored.isPresent()) return stored.get();
+        if ((isNative(profile) && profile.username().isBlank()) || profile.databaseType().equals("sqlite")) return new char[0];
         throw new RpcException("PASSWORD_REQUIRED", "请输入数据库密码",
                 Map.of("profileId", profile.id(), "profileName", profile.name()));
     }
@@ -267,14 +311,204 @@ public final class BackendService implements AutoCloseable {
         closeQueries(profileId);
         BackendWorkspace workspace = workspaces.remove(profileId);
         if (workspace != null) workspace.close();
+        NativeWorkspace nativeWorkspace = nativeWorkspaces.remove(profileId);
+        if (nativeWorkspace != null) nativeWorkspace.close();
         return Map.of("disconnected", true);
     }
 
     private List<String> schemas(String profileId) throws Exception {
+        NativeWorkspace nativeWorkspace = nativeWorkspaces.get(profileId);
+        if (nativeWorkspace instanceof MongoWorkspace mongo) return mongo.databases();
+        if (nativeWorkspace instanceof RedisWorkspace redis) return List.of("db" + redis.selectedDatabase());
         BackendWorkspace workspace = requiredWorkspace(profileId);
         try (Connection connection = workspace.openConnection()) {
             return adapter(workspace).metadataProvider().listSchemas(connection);
         }
+    }
+
+    private Object connectNative(String profileId, ConnectionProfile profile, String suppliedPassword) throws Exception {
+        NativeWorkspace existing = nativeWorkspaces.get(profileId);
+        if (existing != null) return Map.of("profile", profileView(profile), "schemas", schemas(profileId));
+        char[] password = passwordFor(profile, suppliedPassword);
+        NativeWorkspace workspace = null;
+        try {
+            workspace = openNativeWorkspace(profile, password);
+            workspace.verify();
+            List<String> namespaces = workspace instanceof MongoWorkspace mongo ? mongo.databases() : List.of("db" + ((RedisWorkspace) workspace).selectedDatabase());
+            NativeWorkspace concurrent = nativeWorkspaces.putIfAbsent(profileId, workspace);
+            if (concurrent != null) {
+                workspace.close();
+            }
+            workspace = null;
+            return Map.of("profile", profileView(profile), "schemas", namespaces);
+        } finally {
+            if (workspace != null) workspace.close();
+            Arrays.fill(password, '\0');
+        }
+    }
+
+    private NativeWorkspace openNativeWorkspace(ConnectionProfile profile, char[] password) {
+        return switch (profile.databaseType()) {
+            case "mongo" -> new MongoWorkspace(profile, password);
+            case "redis" -> new RedisWorkspace(profile, password);
+            default -> throw new RpcException("INVALID_ARGUMENT", "不是原生客户端连接");
+        };
+    }
+
+    private static boolean isNative(ConnectionProfile profile) { return profile.databaseType().equals("mongo") || profile.databaseType().equals("redis"); }
+
+    private static boolean redisAuthenticationFailed(Throwable throwable) {
+        String message = rootMessage(throwable).toUpperCase(java.util.Locale.ROOT);
+        return message.contains("NOAUTH") || message.contains("WRONGPASS")
+                || message.contains("AUTHENTICATION REQUIRED") || message.contains("INVALID PASSWORD");
+    }
+
+    private Object mongoCollections(JsonNode params) {
+        MongoWorkspace workspace = requiredNative(requiredText(params, "profileId"), MongoWorkspace.class);
+        return workspace.collections(requiredText(params, "database"));
+    }
+
+    private Object mongoDocuments(JsonNode params) throws Exception {
+        MongoWorkspace workspace = requiredNative(requiredText(params, "profileId"), MongoWorkspace.class);
+        String database = requiredText(params, "database");
+        String collection = requiredText(params, "collection");
+        Document filter = params.path("filter").asText("").isBlank() ? new Document() : Document.parse(params.path("filter").asText());
+        int pageSize = Math.max(1, Math.min(200, params.path("pageSize").asInt(50)));
+        int page = Math.max(1, Math.min(Integer.MAX_VALUE / pageSize, params.path("page").asInt(1)));
+        List<JsonNode> documents = new ArrayList<>();
+        for (Document document : workspace.documents(database, collection, filter, (page - 1) * pageSize, pageSize)) {
+            // Extended JSON preserves ObjectId, Decimal128, dates and binary values instead of
+            // exposing Jackson's JavaBean view of BSON implementation classes.
+            documents.add(mapper.readTree(document.toJson()));
+        }
+        return Map.of("documents", documents, "totalRows", workspace.count(database, collection, filter), "page", page, "pageSize", pageSize);
+    }
+
+    private Object mongoInsert(JsonNode params) {
+        MongoWorkspace workspace = requiredNative(requiredText(params, "profileId"), MongoWorkspace.class);
+        Document document = Document.parse(requiredText(params, "document"));
+        String id = workspace.insert(requiredText(params, "database"), requiredText(params, "collection"), document);
+        return Map.of("inserted", true, "id", id);
+    }
+
+    private Object mongoReplace(JsonNode params) {
+        MongoWorkspace workspace = requiredNative(requiredText(params, "profileId"), MongoWorkspace.class);
+        long updated = workspace.replace(requiredText(params, "database"), requiredText(params, "collection"), requiredText(params, "id"), Document.parse(requiredText(params, "document")));
+        return Map.of("updated", updated);
+    }
+
+    private Object mongoDelete(JsonNode params) {
+        MongoWorkspace workspace = requiredNative(requiredText(params, "profileId"), MongoWorkspace.class);
+        long deleted = workspace.delete(requiredText(params, "database"), requiredText(params, "collection"), requiredText(params, "id"));
+        return Map.of("deleted", deleted);
+    }
+
+    private Object redisKeys(JsonNode params) {
+        RedisWorkspace workspace = requiredNative(requiredText(params, "profileId"), RedisWorkspace.class);
+        String pattern = params.path("pattern").asText("*");
+        if (pattern.isBlank()) pattern = "*";
+        if (pattern.length() > 4_096 || pattern.indexOf('\0') >= 0) {
+            throw new RpcException("INVALID_ARGUMENT", "Redis SCAN 匹配模式无效");
+        }
+        String requestedCursor = params.path("cursor").asText("0").strip();
+        if (!requestedCursor.matches("[0-9]{1,20}")) {
+            throw new RpcException("INVALID_ARGUMENT", "Redis SCAN 游标必须为非负整数");
+        }
+        int requestedCount = params.has("count") ? params.path("count").asInt(200) : params.path("pageSize").asInt(200);
+        int count = Math.max(1, Math.min(1_000, requestedCount));
+        KeyScanCursor<String> cursor = workspace.scan(requestedCursor, pattern, count);
+        return Map.of("keys", cursor.getKeys(), "cursor", cursor.getCursor(), "finished", cursor.isFinished());
+    }
+
+    private Object redisKey(JsonNode params) {
+        RedisWorkspace workspace = requiredNative(requiredText(params, "profileId"), RedisWorkspace.class);
+        String key = requiredText(params, "key");
+        var commands = workspace.connection().sync();
+        String type = commands.type(key);
+        Object value = switch (type) {
+            case "string" -> {
+                long length = commands.strlen(key);
+                String content = commands.getrange(key, 0, 65_535);
+                yield Map.of("content", content == null ? "(nil)" : content,
+                        "length", length, "truncated", length > 65_536);
+            }
+            case "hash" -> {
+                var cursor = commands.hscan(key, io.lettuce.core.ScanArgs.Builder.limit(200));
+                Map<String, String> entries = new LinkedHashMap<>();
+                cursor.getMap().entrySet().stream().limit(200)
+                        .forEach(entry -> entries.put(entry.getKey(), entry.getValue()));
+                yield Map.of("entries", entries, "length", commands.hlen(key),
+                        "truncated", !cursor.isFinished() || cursor.getMap().size() > entries.size());
+            }
+            case "list" -> {
+                long length = commands.llen(key);
+                yield Map.of("items", commands.lrange(key, 0, 199), "length", length,
+                        "truncated", length > 200);
+            }
+            case "set" -> {
+                var cursor = commands.sscan(key, io.lettuce.core.ScanArgs.Builder.limit(200));
+                List<String> members = cursor.getValues().stream().limit(200).toList();
+                yield Map.of("members", members, "length", commands.scard(key),
+                        "truncated", !cursor.isFinished() || cursor.getValues().size() > members.size());
+            }
+            case "zset" -> {
+                long length = commands.zcard(key);
+                List<Map<String, Object>> members = commands.zrangeWithScores(key, 0, 199).stream()
+                        .map(item -> Map.<String, Object>of("value", item.getValue(), "score", item.getScore()))
+                        .toList();
+                yield Map.of("members", members, "length", length, "truncated", length > 200);
+            }
+            case "none" -> "(nil)";
+            default -> "该键类型暂不支持可视化读取";
+        };
+        return Map.of("key", key, "type", type, "ttl", commands.ttl(key), "value", value == null ? "(nil)" : value);
+    }
+
+    private Object redisCommand(JsonNode params) {
+        RedisWorkspace workspace = requiredNative(requiredText(params, "profileId"), RedisWorkspace.class);
+        RedisCommandExecutor.ParsedCommand command;
+        try {
+            command = RedisCommandExecutor.parse(requiredText(params, "command"));
+        } catch (IllegalArgumentException exception) {
+            throw new RpcException("INVALID_ARGUMENT", exception.getMessage());
+        }
+        if (command.blocked()) {
+            String message = switch (command.risk()) {
+                case BLOCKING -> "该命令可能无限阻塞连接，命令台不允许执行";
+                case LARGE_RESULT -> "该命令可能返回无界大结果，请使用有截断保护的键查看器";
+                case UNKNOWN -> "该命令不在安全允许列表中，命令台不允许执行";
+                default -> "该命令会改变或破坏当前 Redis 会话，命令台不允许执行";
+            };
+            throw new RpcException("UNSUPPORTED_COMMAND", message,
+                    Map.of("command", command.operation(), "risk", command.risk().wireName(), "dangerous", true));
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("command", command.operation());
+        response.put("risk", command.risk().wireName());
+        response.put("dangerous", command.dangerous());
+        boolean confirmed = params.path("confirmed").asBoolean(false);
+        if (command.dangerous() && !confirmed) {
+            response.put("executed", false);
+            response.put("requiresConfirmation", true);
+            return response;
+        }
+        Object result;
+        try {
+            result = RedisCommandExecutor.execute(workspace.connection(), command);
+        } catch (IllegalArgumentException exception) {
+            throw new RpcException("UNSUPPORTED_COMMAND", exception.getMessage());
+        }
+        response.put("executed", true);
+        response.put("requiresConfirmation", false);
+        response.put("result", result == null ? "(nil)" : result);
+        return response;
+    }
+
+    private <T extends NativeWorkspace> T requiredNative(String profileId, Class<T> type) {
+        NativeWorkspace workspace = nativeWorkspaces.get(profileId);
+        if (!type.isInstance(workspace)) throw new RpcException("NOT_CONNECTED", "请先连接对应的数据库");
+        return type.cast(workspace);
     }
 
     private Object listObjects(JsonNode params) throws Exception {
@@ -291,6 +525,7 @@ public final class BackendService implements AutoCloseable {
         DmTableDdlBuilder.Definition definition = tableDefinition(params);
         BackendWorkspace workspace = requiredWorkspace(profileId);
         DatabaseAdapter adapter = adapter(workspace);
+        if (!adapter.id().equals("dm") && !adapter.id().equals("mysql")) throw new RpcException("UNSUPPORTED_OPERATION", "当前数据库首版请通过 SQL 工作台创建表");
         String sql;
         List<String> comments;
         if (adapter.id().equals("mysql")) {
@@ -315,6 +550,7 @@ public final class BackendService implements AutoCloseable {
         DmTableDdlBuilder.Definition target = tableDefinition(params.path("target"));
         BackendWorkspace workspace = requiredWorkspace(profileId);
         DatabaseAdapter adapter = adapter(workspace);
+        if (!adapter.id().equals("dm") && !adapter.id().equals("mysql")) throw new RpcException("UNSUPPORTED_OPERATION", "当前数据库首版请通过 SQL 工作台修改表");
         List<String> statements = adapter.id().equals("mysql")
                 ? new MySqlTableDdlBuilder(adapter).alter(original, target)
                 : new DmTableDdlBuilder(adapter).alter(original, target);
@@ -584,6 +820,8 @@ public final class BackendService implements AutoCloseable {
     }
 
     private Object openQuery(String profileId) throws Exception {
+        ConnectionProfile profile = requireProfile(profileId);
+        if (isNative(profile)) throw new RpcException("UNSUPPORTED_OPERATION", "当前连接使用原生工作台，不支持 SQL 会话");
         BackendWorkspace workspace = requiredWorkspace(profileId);
         BackendQuery query = new BackendQuery(profileId, workspace, workspace.openSession());
         queries.put(query.id(), query);
@@ -809,9 +1047,11 @@ public final class BackendService implements AutoCloseable {
         String host = requiredText(params, "host").strip();
         int port = params.path("port").asInt(adapter.defaultPort());
         String database = params.path("database").asText("").strip();
-        String username = requiredText(params, "username").strip();
-        String driverId = requiredText(params, "driverId");
-        Optional<DriverDescriptor> selectedDriver = context.drivers().findById(driverId);
+        boolean nativeClient = databaseType.equals("mongo") || databaseType.equals("redis");
+        String username = params.path("username").asText("").strip();
+        if (!nativeClient && !databaseType.equals("sqlite") && username.isBlank()) throw new RpcException("INVALID_ARGUMENT", "缺少参数：username");
+        String driverId = nativeClient ? "builtin:" + databaseType : requiredText(params, "driverId");
+        Optional<DriverDescriptor> selectedDriver = nativeClient ? Optional.empty() : context.drivers().findById(driverId);
         if (selectedDriver.isPresent() && !selectedDriver.get().driverClass().equals(adapter.driverClassName())) {
             throw new RpcException("INVALID_ARGUMENT", "所选 JDBC 驱动不适用于" + adapter.displayName());
         }
@@ -819,7 +1059,7 @@ public final class BackendService implements AutoCloseable {
         JsonNode advanced = params.path("advancedProperties");
         if (advanced.isObject()) advanced.fields().forEachRemaining(entry -> {
             if (DatabaseAdapter.isSensitiveProperty(entry.getKey())) {
-                throw new RpcException("INVALID_ARGUMENT", "用户名和密码不能写入高级 JDBC 参数");
+                throw new RpcException("INVALID_ARGUMENT", "用户名、密码或其他凭据不能写入高级连接参数");
             }
             if (databaseType.equals("mysql") && (entry.getKey().equalsIgnoreCase("databaseTerm")
                     || entry.getKey().equalsIgnoreCase("useAffectedRows"))) {
@@ -830,9 +1070,12 @@ public final class BackendService implements AutoCloseable {
         // Validate host, port, database path and URL encoding before persisting the profile.
         adapter.buildJdbcUrl(host, port, database, properties);
         boolean remember = params.path("rememberPassword").asBoolean(true);
-        return id.isEmpty()
+        ConnectionProfile profile = id.isEmpty()
                 ? ConnectionProfile.create(databaseType, name, host, port, database, username, driverId, properties, remember)
                 : new ConnectionProfile(id, name, databaseType, host, port, database, username, driverId, properties, remember);
+        if (databaseType.equals("mongo")) MongoWorkspace.validateConfiguration(profile);
+        if (databaseType.equals("redis")) RedisWorkspace.validateConfiguration(profile);
+        return profile;
     }
 
     private ConnectionProfile requireProfile(String profileId) throws Exception {
@@ -877,6 +1120,14 @@ public final class BackendService implements AutoCloseable {
         queries.clear();
         workspaces.values().forEach(BackendWorkspace::close);
         workspaces.clear();
+        nativeWorkspaces.values().forEach(workspace -> {
+            try {
+                workspace.close();
+            } catch (RuntimeException ignored) {
+                // Continue releasing the remaining clients during reset/application shutdown.
+            }
+        });
+        nativeWorkspaces.clear();
     }
 
     private static String rootMessage(Throwable throwable) {

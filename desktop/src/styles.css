@@ -783,3 +783,43 @@ body { font-size: 15px; }
   border-radius: 8px;
   background: #f8fbff;
 }
+.file-picker { display: flex; gap: 8px; }
+.file-picker .field-input { flex: 1; }
+.native-workspace { height: 100%; box-sizing: border-box; overflow: auto; padding: 28px; max-width: 1100px; }
+.native-workspace h2 { margin: 0 0 5px; }
+.native-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
+.native-actions .field-input { min-width: 180px; }
+.native-key-list { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 7px; min-height: 260px; max-height: 330px; overflow: auto; padding: 14px; border: 1px solid #e2e8f2; border-radius: 12px; background: #fbfcfe; }
+.native-key-list button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 7px 10px; border: 1px solid #dfe8f5; border-radius: 7px; background: #f0f5ff; color: #2458a8; text-align: left; cursor: pointer; transition: .15s; }
+.native-key-list button:hover, .native-key-list button.selected { border-color: #8bb4fa; background: #dceaff; color: #174b9a; }
+.native-output { margin: 12px 0 0; min-height: 220px; max-height: 290px; overflow: auto; padding: 16px; border: 1px solid #172337; border-radius: 10px; background: #0e1828; color: #dbeafe; white-space: pre-wrap; }
+.redis-workspace { max-width: none; padding: 26px 30px 32px; background: linear-gradient(180deg, #f8fbff 0, #fff 180px); }
+.redis-hero { display: flex; align-items: center; gap: 14px; padding-bottom: 23px; border-bottom: 1px solid #e6edf6; }
+.redis-hero-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 13px; background: #dff8f1; color: #0a9b79; }
+.redis-hero .eyebrow { color: #8090a6; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.redis-hero .eyebrow span { margin-left: 7px; padding: 3px 6px; border-radius: 4px; background: #e9f1ff; color: #4778c7; letter-spacing: .04em; }
+.redis-hero h2 { color: #172033; font-size: 21px; }
+.redis-hero p { margin: 0; color: #8390a4; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.redis-hero-state { margin-left: auto; padding: 7px 11px; border: 1px solid #cfeee5; border-radius: 20px; background: #f0fcf8; color: #159274; font-size: 12px; }
+.redis-hero-state i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #18b98f; box-shadow: 0 0 0 3px #d4f6eb; }
+.redis-scanbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 22px 0 15px; }
+.redis-section-title { display: flex; align-items: center; gap: 9px; color: #1e2e47; }
+.redis-section-title > svg { color: #4380e8; }
+.redis-section-title strong, .redis-panel-head strong { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.redis-section-title small, .redis-panel-head small { display: block; margin-top: 4px; color: #8b98aa; font-size: 11px; }
+.redis-pattern { display: flex; gap: 8px; min-width: min(510px, 55%); }
+.redis-pattern .field-input { flex: 1; }
+.redis-body { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(360px, 1.1fr); gap: 14px; }
+.redis-panel, .redis-command-panel { padding: 15px; border: 1px solid #e2e8f2; border-radius: 13px; background: #fff; box-shadow: 0 5px 18px rgba(29, 55, 93, .04); }
+.redis-panel-head { display: flex; align-items: center; justify-content: space-between; min-height: 33px; margin-bottom: 11px; }
+.redis-pager { display: flex; gap: 5px; }
+.redis-key-input, .redis-command-row { display: flex; gap: 8px; }
+.redis-key-input .field-input, .redis-command-row .field-input { min-width: 0; flex: 1; }
+.redis-empty { display: grid; place-items: center; align-content: center; width: 100%; min-height: 225px; gap: 7px; color: #93a0b3; font-size: 12px; }
+.redis-empty svg { color: #b5c1d2; }
+.redis-empty small { color: #a8b3c2; }
+.redis-empty code { color: #638ad0; }
+.redis-command-panel { margin-top: 14px; padding-bottom: 17px; }
+.redis-command-hint { color: #9ba6b5; font-size: 11px; }
+.redis-prompt { align-self: center; color: #17a983; font: 700 16px ui-monospace, monospace; }
+@media (max-width: 760px) { .redis-workspace { padding: 18px; } .redis-scanbar, .redis-hero { align-items: flex-start; flex-direction: column; } .redis-hero-state { margin-left: 0; } .redis-pattern { width: 100%; min-width: 0; } .redis-body { grid-template-columns: 1fr; } }

@@ -4,7 +4,7 @@ import {
   Plus, RefreshCw, Settings, Unplug, X
 } from "lucide-react";
 import { asRpcError, errorMessage, rpc } from "./api";
-import { databaseTypeLabel } from "./database";
+import { connectionSummary, databaseTypeLabel, isJdbcDatabase, isNativeDatabase, supportsTableDesigner } from "./database";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ConfirmModal, Modal } from "./components/Modal";
 import { HistoryModal } from "./components/HistoryModal";
@@ -13,6 +13,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SqlWorkspace } from "./components/SqlWorkspace";
 import { supportedTableTypes, TableDesignerModal } from "./components/TableDesignerModal";
 import { WelcomePanel } from "./components/WelcomePanel";
+import { NativeWorkspace } from "./components/NativeWorkspace";
 import type {
   BootstrapData, ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType,
   AppUpdateInfo, HistoryEntry, ObjectLoadResult, QueryOpenResult, QueryStatus, TableDefinitionDraft, TableDetails, WorkspaceTab
@@ -140,6 +141,14 @@ export default function App() {
   }, [updateManifestUrl]);
 
   const selectedProfile = useMemo(() => data?.profiles.find(profile => profile.id === selectedProfileId) ?? null, [data, selectedProfileId]);
+  const hasConnectedJdbcProfile = Boolean(data?.profiles.some(profile => profile.connected && isJdbcDatabase(profile.databaseType)));
+  const showSqlEntrypoints = !selectedProfile || isJdbcDatabase(selectedProfile.databaseType);
+
+  function selectProfile(profileId: string) {
+    setSelectedProfileId(profileId);
+    const profile = data?.profiles.find(item => item.id === profileId);
+    if (profile?.connected && isNativeDatabase(profile.databaseType)) setActiveTabId("welcome");
+  }
 
   async function connect(profile: ConnectionProfile, password = "") {
     setSelectedProfileId(profile.id);
@@ -148,6 +157,7 @@ export default function App() {
       const result = await rpc<{ profile: ConnectionProfile; schemas: string[] }>("connection.connect", { profileId: profile.id, password });
       setSchemasByProfile(value => ({ ...value, [profile.id]: result.schemas }));
       await loadBootstrap();
+      if (isNativeDatabase(profile.databaseType)) setActiveTabId("welcome");
       setPasswordPrompt(null);
       setStatus(`已连接 ${profile.name} · ${result.schemas.length} 个模式`);
     } catch (cause) {
@@ -208,6 +218,7 @@ export default function App() {
     try {
       const profile = data?.profiles.find(item => item.id === profileId);
       if (!profile) throw new Error("找不到数据库连接配置");
+      if (!supportsTableDesigner(profile.databaseType)) throw new Error("当前数据库请通过 SQL 工作台修改表结构");
       const result = await rpc<ObjectLoadResult>("object.load", { profileId, ...object });
       if (!result.details) throw new Error(result.detailsError || "未能读取表结构");
       const unsafe = result.details.columns.find(column => column.safelyEditable === false);
@@ -295,9 +306,12 @@ export default function App() {
   }
 
   async function newSql(profileId?: string, initialSql = "") {
-    const profile = data?.profiles.find(item => item.id === (profileId ?? selectedProfileId))
-      ?? data?.profiles.find(item => item.connected);
+    const requestedProfile = profileId ? data?.profiles.find(item => item.id === profileId) : undefined;
+    const selectedJdbcProfile = !profileId && selectedProfile?.connected && isJdbcDatabase(selectedProfile.databaseType) ? selectedProfile : undefined;
+    const profile = requestedProfile ?? selectedJdbcProfile
+      ?? data?.profiles.find(item => item.connected && isJdbcDatabase(item.databaseType));
     if (!profile?.connected) { setStatus("请先连接数据库，再打开 SQL 工作台"); return; }
+    if (isNativeDatabase(profile.databaseType)) { setStatus(`${profile.name} 使用原生工作台，不支持 SQL 会话`); return; }
     setStatus(`正在为 ${profile.name} 创建独立 SQL 会话…`);
     try {
       const opened = await rpc<QueryOpenResult>("query.open", { profileId: profile.id });
@@ -467,7 +481,7 @@ export default function App() {
         schemasByProfile={schemasByProfile}
         objectsByKey={objectsByKey}
         loadingKeys={loadingKeys}
-        onSelectProfile={setSelectedProfileId}
+        onSelectProfile={selectProfile}
         onNewConnection={() => setConnectionModal("new")}
         onEditConnection={setConnectionModal}
         onCopyConnection={profile => void copyProfile(profile)}
@@ -479,7 +493,7 @@ export default function App() {
         onOpenObject={openObject}
         onNewTable={(profileId, schema) => {
           const profile = data.profiles.find(item => item.id === profileId);
-          if (profile) setTableDesigner({ profileId, databaseType: profile.databaseType, schema });
+          if (profile && supportsTableDesigner(profile.databaseType)) setTableDesigner({ profileId, databaseType: profile.databaseType, schema });
         }}
         onEditTable={(profileId, object) => void editTable(profileId, object)}
         onGetLongRowStatus={getLongRowStatus}
@@ -494,13 +508,13 @@ export default function App() {
         <header className="workspace-toolbar">
           <div className="toolbar-context">
             <span className={`context-icon${selectedProfile?.connected ? " online" : ""}`}><Database size={17} /></span>
-            <div><span className="connection-name"><strong>{selectedProfile?.name ?? "DM Connect 工作台"}</strong>{selectedProfile && <em className={`database-type-badge ${selectedProfile.databaseType}`}>{databaseTypeLabel(selectedProfile.databaseType)}</em>}</span><small>{selectedProfile ? `${selectedProfile.username}@${selectedProfile.host}:${selectedProfile.port}` : "选择或创建数据库连接"}</small></div>
+            <div><span className="connection-name"><strong>{selectedProfile?.name ?? "DM Connect 工作台"}</strong>{selectedProfile && <em className={`database-type-badge ${selectedProfile.databaseType}`}>{databaseTypeLabel(selectedProfile.databaseType)}</em>}</span><small>{selectedProfile ? connectionSummary(selectedProfile) : "选择或创建数据库连接"}</small></div>
           </div>
           <span className="app-status">{status}</span>
           <div className="workspace-actions">
             {selectedProfile && !selectedProfile.connected && <button className="button primary compact" onClick={() => connect(selectedProfile)}>连接</button>}
             {selectedProfile?.connected && <button className="button secondary compact" onClick={() => disconnect(selectedProfile)}><Unplug size={14} />断开</button>}
-            <button className="button primary compact" onClick={() => newSql()} disabled={!data.profiles.some(profile => profile.connected)}><Code2 size={14} />新建 SQL</button>
+            {showSqlEntrypoints && <button className="button primary compact" onClick={() => newSql()} disabled={!hasConnectedJdbcProfile}><Code2 size={14} />新建 SQL</button>}
             <button className="icon-button toolbar-icon" onClick={() => selectedProfile?.connected && refreshSchemas(selectedProfile)} title="刷新对象"><RefreshCw size={16} /></button>
             <button className="icon-button toolbar-icon" onClick={() => setHistoryOpen(true)} title="SQL 历史"><History size={16} /></button>
             <button className="icon-button toolbar-icon" onClick={() => setSettingsOpen(true)} title="设置"><Settings size={16} /></button>
@@ -513,7 +527,7 @@ export default function App() {
             {editingTabId === tab.id ? <input className="workspace-tab-rename" value={editingTabTitle} autoFocus onChange={event => setEditingTabTitle(event.target.value)} onBlur={() => finishTabRename(tab.id)} onKeyDown={event => { if (event.key === "Enter") finishTabRename(tab.id); if (event.key === "Escape") setEditingTabId(null); }} onClick={event => event.stopPropagation()} /> : <span title={tab.type === "welcome" ? undefined : "双击重命名"}>{tab.title}</span>}
             {tab.type !== "welcome" && <i role="button" aria-label={`关闭 ${tab.title}`} onClick={event => { event.stopPropagation(); void closeTab(tab); }}><X size={12} /></i>}
           </button>)}</div>
-          <button className="new-tab-button" onClick={() => newSql()} title="新建 SQL 标签"><Plus size={15} /></button>
+          {showSqlEntrypoints && <button className="new-tab-button" onClick={() => newSql()} disabled={!hasConnectedJdbcProfile} title="新建 SQL 标签"><Plus size={15} /></button>}
           {tabContextMenu && <div className="tab-context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }} onMouseDown={event => event.stopPropagation()}>
             {tabContextMenu.tab.type === "sql" && <button onClick={() => { const tab = tabContextMenu.tab; setTabContextMenu(null); if (tab.type === "sql") void saveSqlTab(tab); }}><Save size={14} />保存 SQL</button>}
             {tabContextMenu.tab.type !== "welcome" && <button onClick={() => { const tab = tabContextMenu.tab; setTabContextMenu(null); beginTabRename(tab); }}>重命名</button>}
@@ -525,8 +539,8 @@ export default function App() {
 
         <div className="workspace-content">
           {tabs.map(tab => <div key={tab.id} className={`workspace-panel${activeTabId === tab.id ? " active" : ""}`}>
-            {tab.type === "welcome" && <WelcomePanel data={data} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onConnect={profile => profile.connected ? setSelectedProfileId(profile.id) : connect(profile)} />}
-            {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onEditTable={columnName => void editTable(tab.profileId, tab.result.object, columnName)} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
+            {tab.type === "welcome" && selectedProfile?.connected && isNativeDatabase(selectedProfile.databaseType) ? <NativeWorkspace key={selectedProfile.id} profile={selectedProfile} namespaces={schemasByProfile[selectedProfile.id] ?? []} /> : tab.type === "welcome" && <WelcomePanel data={data} showSqlAction={showSqlEntrypoints} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onConnect={profile => profile.connected ? selectProfile(profile.id) : connect(profile)} />}
+            {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onEditTable={supportsTableDesigner(data.profiles.find(item => item.id === tab.profileId)?.databaseType ?? "sqlite") ? columnName => void editTable(tab.profileId, tab.result.object, columnName) : undefined} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
             {tab.type === "sql" && activeTabId === tab.id && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={sqlByTabId[tab.id] ?? tab.initialSql} onSqlChange={sql => setSqlByTabId(value => ({ ...value, [tab.id]: sql }))} />}
           </div>)}
         </div>
@@ -553,11 +567,11 @@ export default function App() {
         onAlter={(original, target) => alterTable(tableDesigner.profileId, tableDesigner.object!, original, target)}
       />}
       {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} onOpen={entry => void openHistory(entry)} />}
-      {passwordPrompt && <Modal title={`连接到 ${passwordPrompt.profile.name}`} description={`${passwordPrompt.profile.username}@${passwordPrompt.profile.host}:${passwordPrompt.profile.port}`} onClose={() => setPasswordPrompt(null)} footer={<><button className="button secondary" onClick={() => setPasswordPrompt(null)}>取消</button><button className="button primary" disabled={passwordPrompt.busy || !passwordPrompt.password} onClick={() => { setPasswordPrompt({ ...passwordPrompt, busy: true, error: "" }); void connect(passwordPrompt.profile, passwordPrompt.password); }}>{passwordPrompt.busy && <LoaderCircle className="spin" size={15} />}连接</button></>}>
+      {passwordPrompt && <Modal title={`连接到 ${passwordPrompt.profile.name}`} description={connectionSummary(passwordPrompt.profile)} onClose={() => setPasswordPrompt(null)} footer={<><button className="button secondary" onClick={() => setPasswordPrompt(null)}>取消</button><button className="button primary" disabled={passwordPrompt.busy || !passwordPrompt.password} onClick={() => { setPasswordPrompt({ ...passwordPrompt, busy: true, error: "" }); void connect(passwordPrompt.profile, passwordPrompt.password); }}>{passwordPrompt.busy && <LoaderCircle className="spin" size={15} />}连接</button></>}>
         <label className="field-label">数据库密码<input autoFocus className="field-input" type="password" value={passwordPrompt.password} onChange={event => setPasswordPrompt({ ...passwordPrompt, password: event.target.value })} onKeyDown={event => { if (event.key === "Enter" && passwordPrompt.password) { setPasswordPrompt({ ...passwordPrompt, busy: true, error: "" }); void connect(passwordPrompt.profile, passwordPrompt.password); } }} /></label>{passwordPrompt.error && <div className="form-error">{passwordPrompt.error}</div>}
       </Modal>}
       {settingsOpen && <Modal title="DM Connect 设置" description={`桌面客户端 ${data.version}`} onClose={() => setSettingsOpen(false)} footer={<button className="button primary" onClick={() => setSettingsOpen(false)}>完成</button>}>
-        <div className="settings-list"><section><span><FileUp size={18} /></span><div><strong>JDBC 驱动</strong><small>MySQL Connector/J 已内置；DM 或其他 MySQL 版本可从连接窗口导入</small></div><button className="button secondary compact" onClick={() => { setSettingsOpen(false); setConnectionModal("new"); }}>管理驱动</button></section><section className="update-settings"><span><RefreshCw size={18} /></span><div><strong>应用更新</strong><small>更新清单地址</small><input className="field-input" value={updateManifestUrl} placeholder="http://服务器地址/dm-connect-updates/update.json" onChange={event => setUpdateManifestUrl(event.target.value)} /></div><button className="button secondary compact" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForAppUpdate(false)}>{checkingUpdate ? "检查中" : "检查更新"}</button></section><section><span><LockKeyhole size={18} /></span><div><strong>本地数据</strong><small>密码和 SQL 历史仅保存在本机，应用自动管理加密密钥</small></div><button className="button danger-text compact" onClick={() => setResetConfirm(true)}>清除</button></section></div>
+        <div className="settings-list"><section><span><FileUp size={18} /></span><div><strong>JDBC 驱动</strong><small>MySQL、PostgreSQL、SQL Server、SQLite 已内置；DM、Oracle 或替代版本可从连接窗口导入</small></div><button className="button secondary compact" onClick={() => { setSettingsOpen(false); setConnectionModal("new"); }}>管理驱动</button></section><section className="update-settings"><span><RefreshCw size={18} /></span><div><strong>应用更新</strong><small>更新清单地址</small><input className="field-input" value={updateManifestUrl} placeholder="http://服务器地址/dm-connect-updates/update.json" onChange={event => setUpdateManifestUrl(event.target.value)} /></div><button className="button secondary compact" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForAppUpdate(false)}>{checkingUpdate ? "检查中" : "检查更新"}</button></section><section><span><LockKeyhole size={18} /></span><div><strong>本地数据</strong><small>密码和 SQL 历史仅保存在本机，应用自动管理加密密钥</small></div><button className="button danger-text compact" onClick={() => setResetConfirm(true)}>清除</button></section></div>
       </Modal>}
       {updateDialog && <Modal title={`发现新版本 ${updateDisplayVersion(updateDialog)}`} description="下载完成后，应用会自动退出、替换并重启。" onClose={() => !installingUpdate && setUpdateDialog(null)} footer={<><button className="button secondary" disabled={installingUpdate} onClick={() => setUpdateDialog(null)}>稍后</button><button className="button primary" disabled={installingUpdate} onClick={() => void installAvailableUpdate()}>{installingUpdate && <LoaderCircle className="spin" size={15} />}{installingUpdate ? `正在下载${updateDownloadProgress == null ? "" : ` ${updateDownloadProgress}%`}` : "立即更新"}</button></>}><p className="confirm-message">{updateDialog.notes?.trim() || "本次更新已准备好，可以立即安装。"}</p>{installingUpdate && <div className="update-download-progress" aria-label="更新下载进度"><div><span>正在下载更新包</span><strong>{updateDownloadProgress == null ? "准备中" : `${updateDownloadProgress}%`}</strong></div><i><b style={{ width: `${updateDownloadProgress ?? 0}%` }} /></i></div>}</Modal>}
       {deleteTarget && <ConfirmModal title="删除数据库连接" message={`确认删除“${deleteTarget.name}”吗？保存的密码也会一并删除。`} confirmText="删除连接" danger onCancel={() => setDeleteTarget(null)} onConfirm={() => void deleteProfile()} />}

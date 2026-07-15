@@ -29,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class DriverManagerService implements AutoCloseable {
     static final String BUILT_IN_MYSQL_DRIVER_ID = "builtin:mysql-connector-j";
+    static final String BUILT_IN_POSTGRESQL_DRIVER_ID = "builtin:postgresql";
+    static final String BUILT_IN_SQLSERVER_DRIVER_ID = "builtin:sqlserver";
+    static final String BUILT_IN_SQLITE_DRIVER_ID = "builtin:sqlite";
     private static final TypeReference<List<DriverDescriptor>> DRIVER_LIST = new TypeReference<>() {
     };
     private final AppPaths paths;
@@ -44,8 +47,11 @@ public final class DriverManagerService implements AutoCloseable {
         List<DriverDescriptor> descriptors = Files.exists(paths.driversFile())
                 ? new ArrayList<>(store.read(paths.driversFile(), DRIVER_LIST))
                 : new ArrayList<>();
-        descriptors.removeIf(driver -> driver.id().equals(BUILT_IN_MYSQL_DRIVER_ID));
+        descriptors.removeIf(driver -> driver.id().startsWith("builtin:"));
         descriptors.add(builtInMysqlDescriptor());
+        descriptors.add(builtInDescriptor(BUILT_IN_POSTGRESQL_DRIVER_ID, "PostgreSQL JDBC（应用内置）", "org.postgresql.Driver", "42.7"));
+        descriptors.add(builtInDescriptor(BUILT_IN_SQLSERVER_DRIVER_ID, "SQL Server JDBC（应用内置）", "com.microsoft.sqlserver.jdbc.SQLServerDriver", "12.8"));
+        descriptors.add(builtInDescriptor(BUILT_IN_SQLITE_DRIVER_ID, "SQLite JDBC（应用内置）", "org.sqlite.JDBC", "3.47"));
         descriptors.sort(Comparator.comparing(DriverDescriptor::importedAt).reversed());
         return List.copyOf(descriptors);
     }
@@ -105,6 +111,9 @@ public final class DriverManagerService implements AutoCloseable {
                 loaded.put(descriptorId, runtime);
                 return runtime.driver();
             }
+            if (BUILT_IN_POSTGRESQL_DRIVER_ID.equals(descriptorId)) { runtime = new DriverRuntime(new org.postgresql.Driver()); loaded.put(descriptorId, runtime); return runtime.driver(); }
+            if (BUILT_IN_SQLSERVER_DRIVER_ID.equals(descriptorId)) { runtime = new DriverRuntime(new com.microsoft.sqlserver.jdbc.SQLServerDriver()); loaded.put(descriptorId, runtime); return runtime.driver(); }
+            if (BUILT_IN_SQLITE_DRIVER_ID.equals(descriptorId)) { runtime = new DriverRuntime(new org.sqlite.JDBC()); loaded.put(descriptorId, runtime); return runtime.driver(); }
             DriverDescriptor descriptor = findById(descriptorId)
                     .orElseThrow(() -> new IllegalArgumentException("找不到指定的 JDBC 驱动"));
             Path jar = Path.of(descriptor.storedPath());
@@ -135,6 +144,10 @@ public final class DriverManagerService implements AutoCloseable {
                 "com.mysql.cj.jdbc.Driver",
                 version,
                 Instant.MAX);
+    }
+
+    private static DriverDescriptor builtInDescriptor(String id, String name, String className, String version) {
+        return new DriverDescriptor(id, name, "classpath:" + className, id, className, version, Instant.MAX);
     }
 
     private static DriverRuntime loadRuntime(Path jar, String driverClass) throws Exception {

@@ -1,16 +1,17 @@
 import { ArrowRight, Code2, Database, FileUp, Layers3, Plus, ShieldCheck } from "lucide-react";
 import type { BootstrapData, ConnectionProfile } from "../types";
-import { databaseTypeLabel } from "../database";
+import { connectionSummary, databaseTypeLabel } from "../database";
 
 interface WelcomePanelProps {
   data: BootstrapData;
+  showSqlAction?: boolean;
   onNewConnection: () => void;
   onNewSql: () => void;
   onImportDriver: () => void;
   onConnect: (profile: ConnectionProfile) => void;
 }
 
-export function WelcomePanel({ data, onNewConnection, onNewSql, onImportDriver, onConnect }: WelcomePanelProps) {
+export function WelcomePanel({ data, showSqlAction = true, onNewConnection, onNewSql, onImportDriver, onConnect }: WelcomePanelProps) {
   const connected = data.profiles.filter(profile => profile.connected);
   return (
     <section className="welcome-panel">
@@ -18,10 +19,10 @@ export function WelcomePanel({ data, onNewConnection, onNewSql, onImportDriver, 
         <div>
           <span className="eyebrow"><span /> DM CONNECT 2.0</span>
           <h1>把数据库工作，<br /><em>变得清晰而高效。</em></h1>
-          <p>连接达梦或 MySQL 数据库、浏览对象、编写 SQL，并在独立事务会话中安全完成每一次操作。</p>
+          <p>统一管理关系型与原生数据库连接，浏览数据对象，并在对应工作台中安全完成操作。</p>
           <div className="hero-actions">
             <button className="button primary large" onClick={onNewConnection}><Plus size={17} />新建数据库连接</button>
-            <button className="button secondary large" onClick={onNewSql}><Code2 size={17} />打开 SQL 工作台</button>
+            {showSqlAction && <button className="button secondary large" onClick={onNewSql}><Code2 size={17} />打开 SQL 工作台</button>}
           </div>
         </div>
         <div className="hero-visual" aria-hidden="true">
@@ -46,10 +47,10 @@ export function WelcomePanel({ data, onNewConnection, onNewSql, onImportDriver, 
           <div className="connection-cards">
             {data.profiles.slice(0, 5).map(profile => <button key={profile.id} onClick={() => onConnect(profile)}>
               <span className={`database-avatar${profile.connected ? " online" : ""}`}><Database size={18} /></span>
-              <span><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{profile.username}@{profile.host}:{profile.port}</small></span>
+              <span><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{connectionSummary(profile)}</small></span>
               <em className={profile.connected ? "online" : ""}>{profile.connected ? "已连接" : "连接"}</em>
             </button>)}
-            {data.profiles.length === 0 && <div className="connection-zero"><Database size={23} /><span><strong>尚未创建连接</strong><small>MySQL 已内置 JDBC；DM 需要导入驱动</small></span><button onClick={onImportDriver}><FileUp size={14} />选择驱动</button></div>}
+            {data.profiles.length === 0 && <div className="connection-zero"><Database size={23} /><span><strong>尚未创建连接</strong><small>MySQL、PostgreSQL、SQL Server 和 SQLite 已内置驱动</small></span><button onClick={onImportDriver}><FileUp size={14} />选择驱动</button></div>}
           </div>
         </section>
         <aside className="security-card"><span><ShieldCheck size={22} /></span><h3>本地优先的安全设计</h3><p>密码与 SQL 历史由 Java 后端加密处理，React 页面无法直接访问文件系统或 JDBC 驱动。</p><div><i />Node.js 隔离<i />私有进程管道<i />内容安全策略</div></aside>

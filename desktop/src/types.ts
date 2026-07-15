@@ -1,4 +1,4 @@
-export type DatabaseType = "dm" | "mysql";
+export type DatabaseType = "dm" | "mysql" | "mongo" | "redis" | "postgresql" | "oracle" | "sqlserver" | "sqlite";
 
 export interface DriverDescriptor {
   id: string;

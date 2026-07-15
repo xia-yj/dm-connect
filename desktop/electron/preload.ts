@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("dmConnect", {
     throw error;
   },
   selectDriver: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-driver"),
+  selectDatabaseFile: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-database-file"),
+  createDatabaseFile: (): Promise<string | null> => ipcRenderer.invoke("dialog:create-database-file"),
   saveCsv: (defaultName: string): Promise<string | null> => ipcRenderer.invoke("dialog:save-csv", defaultName),
   saveSql: (): Promise<string | null> => ipcRenderer.invoke("dialog:save-sql"),
   saveLocalSql: (defaultName: string, content: string): Promise<string | null> => ipcRenderer.invoke("dialog:save-local-sql", defaultName, content),

@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 import type { ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType } from "../types";
-import { databaseTypeLabel } from "../database";
+import { connectionSummary, databaseTypeLabel, isNativeDatabase, supportsTableDesigner } from "../database";
 import { Brand } from "./Brand";
 
 export const OBJECT_KINDS: { kind: DatabaseObjectKind; label: string; icon: typeof Table2 }[] = [
@@ -124,7 +124,7 @@ export function Sidebar(props: SidebarProps) {
   }
 
   useEffect(() => {
-    if (!needle || !active?.connected) return;
+    if (!needle || !active?.connected || isNativeDatabase(active.databaseType)) return;
     const hidden = new Set(hiddenSchemas[active.id] ?? []);
     for (const schema of (props.schemasByProfile[active.id] ?? []).filter(item => !hidden.has(item))) {
       const key = objectKey(active.id, schema, "TABLE");
@@ -186,11 +186,11 @@ export function Sidebar(props: SidebarProps) {
               onContextMenu={event => openProfileContextMenu(event, profile)}
             >
               <span className={`connection-icon${profile.connected ? " online" : ""}`}><Database size={16} /></span>
-              <span className="connection-copy"><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{profile.username}@{profile.host}:{profile.port}</small></span>
+              <span className="connection-copy"><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{connectionSummary(profile)}</small></span>
               <span className={`connection-dot${profile.connected ? " online" : ""}`} />
             </button>
 
-            {profile.connected && expandedProfiles.has(profile.id) && <div className="schema-list">
+            {profile.connected && !isNativeDatabase(profile.databaseType) && expandedProfiles.has(profile.id) && <div className="schema-list">
               <details className="schema-visibility" ref={schemaVisibilityRef}>
                 <summary><ListFilter size={14} /><span>库展示</span><em>{visibleSchemas.length}/{schemas.length}</em></summary>
                 <div className="schema-visibility-panel">
@@ -214,7 +214,7 @@ export function Sidebar(props: SidebarProps) {
               </details>
               {needle ? <div className="table-filter-results">
                 <div className="table-filter-heading"><span>表筛选结果</span>{loadingTables ? <em>正在检索…</em> : <em>{tableResults.length} 个</em>}</div>
-                {tableResults.map(object => <button key={`${object.schema}.${object.name}`} onContextMenu={event => openContextMenu(event, profile.id, object.schema, object)} onDoubleClick={() => props.onOpenObject(profile.id, object)} title="右键编辑，双击打开">
+                {tableResults.map(object => <button key={`${object.schema}.${object.name}`} onContextMenu={supportsTableDesigner(profile.databaseType) ? event => openContextMenu(event, profile.id, object.schema, object) : undefined} onDoubleClick={() => props.onOpenObject(profile.id, object)} title={supportsTableDesigner(profile.databaseType) ? "右键编辑，双击打开" : "双击打开"}>
                   <Table2 size={13} /><span>{object.name}</span><small>{object.schema}</small>
                 </button>)}
                 {!loadingTables && tableResults.length === 0 && <span className="tree-message">没有匹配的表</span>}
@@ -228,11 +228,11 @@ export function Sidebar(props: SidebarProps) {
                     return <details className="category-node" key={kind} onToggle={event => {
                       if (event.currentTarget.open && !objects) props.onLoadObjects(profile.id, schema, kind);
                     }}>
-                      <summary onContextMenu={kind === "TABLE" ? event => openContextMenu(event, profile.id, schema) : undefined}><ChevronDown size={12} /><KindIcon size={13} /><span>{label}</span>{objects && <em>{filtered.length}</em>}</summary>
+                      <summary onContextMenu={kind === "TABLE" && supportsTableDesigner(profile.databaseType) ? event => openContextMenu(event, profile.id, schema) : undefined}><ChevronDown size={12} /><KindIcon size={13} /><span>{label}</span>{objects && <em>{filtered.length}</em>}</summary>
                       <div className="object-list">
                         {props.loadingKeys.has(key) && <span className="tree-message">正在加载…</span>}
                         {!props.loadingKeys.has(key) && objects && filtered.length === 0 && <span className="tree-message">没有匹配对象</span>}
-                        {filtered.map(object => <button key={`${object.schema}.${object.name}`} onContextMenu={kind === "TABLE" ? event => openContextMenu(event, profile.id, schema, object) : undefined} onDoubleClick={() => props.onOpenObject(profile.id, object)} title="双击打开">
+                        {filtered.map(object => <button key={`${object.schema}.${object.name}`} onContextMenu={kind === "TABLE" && supportsTableDesigner(profile.databaseType) ? event => openContextMenu(event, profile.id, schema, object) : undefined} onDoubleClick={() => props.onOpenObject(profile.id, object)} title="双击打开">
                           {kind === "TABLE" ? <Table2 size={12} /> : kind === "VIEW" ? <View size={12} /> : <Code2 size={12} />}
                           <span>{object.name}</span>
                         </button>)}

@@ -5,6 +5,8 @@ declare global {
     dmConnect: {
       request<T>(method: string, params?: unknown): Promise<T>;
       selectDriver(): Promise<string | null>;
+      selectDatabaseFile(): Promise<string | null>;
+      createDatabaseFile(): Promise<string | null>;
       saveCsv(defaultName: string): Promise<string | null>;
       saveSql(): Promise<string | null>;
       saveLocalSql(defaultName: string, content: string): Promise<string | null>;

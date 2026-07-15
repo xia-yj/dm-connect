@@ -1,6 +1,6 @@
 {
   "name": "dm-connect-desktop",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "private": true,
   "description": "DM Connect React + Electron desktop client",
   "main": "dist-electron/main.js",

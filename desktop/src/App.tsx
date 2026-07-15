@@ -38,7 +38,8 @@ interface TableDesignerState {
 }
 
 const welcomeTab: WorkspaceTab = { id: "welcome", type: "welcome", title: "概览" };
-const defaultUpdateManifestUrl = "http://10.20.25.68:8093/dm-connect-updates/update.json";
+const defaultUpdateManifestUrl = "https://github.com/xia-yj/dm-connect/releases/latest/download/update.json";
+const legacyUpdateManifestUrl = "http://10.20.25.68:8093/dm-connect-updates/update.json";
 
 export default function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
@@ -60,7 +61,10 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
   const [tableDesigner, setTableDesigner] = useState<TableDesignerState | null>(null);
-  const [updateManifestUrl, setUpdateManifestUrl] = useState(() => localStorage.getItem("dm-connect.update-manifest-url") ?? defaultUpdateManifestUrl);
+  const [updateManifestUrl, setUpdateManifestUrl] = useState(() => {
+    const stored = localStorage.getItem("dm-connect.update-manifest-url");
+    return stored && stored !== legacyUpdateManifestUrl ? stored : defaultUpdateManifestUrl;
+  });
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(null);
   const [updateDialog, setUpdateDialog] = useState<AppUpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);

@@ -103,6 +103,22 @@ jobs:
           name: DM-Connect-macOS-x64
           path: dist/macos-x64
 
+      - name: Generate GitHub update manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          cat > dist/update.json <<EOF
+          {
+            "version": "${VERSION}",
+            "build": "${RELEASE_TAG}",
+            "arm64Url": "${RELEASE_BASE}/DM-Connect-${VERSION}-arm64.app.zip",
+            "x64Url": "${RELEASE_BASE}/DM-Connect-${VERSION}-x64.app.zip",
+            "notes": "DM Connect ${RELEASE_TAG}"
+          }
+          EOF
+
       - name: Create GitHub Release and upload installers
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,6 +127,7 @@ jobs:
             dist/windows/* \
             dist/macos-arm64/* \
             dist/macos-x64/* \
+            dist/update.json \
             --repo "$GITHUB_REPOSITORY" \
             --title "DM Connect $GITHUB_REF_NAME" \
             --generate-notes

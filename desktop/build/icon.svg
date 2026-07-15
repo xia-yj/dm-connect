@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="80" x2="900" y2="950" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16243D"/>
+      <stop offset="1" stop-color="#090F1D"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="280" y1="220" x2="760" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60A5FA"/>
+      <stop offset="0.48" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="32" stdDeviation="36" flood-color="#000" flood-opacity=".38"/>
+    </filter>
+  </defs>
+  <rect x="76" y="76" width="872" height="872" rx="212" fill="url(#bg)"/>
+  <rect x="112" y="112" width="800" height="800" rx="182" fill="none" stroke="#fff" stroke-opacity=".08" stroke-width="4"/>
+  <g filter="url(#shadow)">
+    <path d="M257 349c0-80 114-145 255-145s255 65 255 145v326c0 80-114 145-255 145S257 755 257 675V349Z" fill="url(#blue)"/>
+    <ellipse cx="512" cy="349" rx="255" ry="145" fill="#6EB1FF"/>
+    <ellipse cx="512" cy="349" rx="198" ry="93" fill="#2563EB"/>
+    <path d="M257 503c0 80 114 145 255 145s255-65 255-145" fill="none" stroke="#BBDDFF" stroke-opacity=".9" stroke-width="25"/>
+    <path d="M257 658c0 80 114 145 255 145s255-65 255-145" fill="none" stroke="#BBDDFF" stroke-opacity=".9" stroke-width="25"/>
+  </g>
+  <circle cx="768" cy="751" r="105" fill="#0F9F8F" stroke="#D5FFF8" stroke-width="18"/>
+  <path d="m721 753 31 31 67-76" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="27"/>
+</svg>

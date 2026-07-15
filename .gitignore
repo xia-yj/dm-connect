@@ -1,0 +1,6 @@
+target/
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+release-backups/
+.DS_Store

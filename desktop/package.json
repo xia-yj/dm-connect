@@ -20,7 +20,6 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@rolldown/binding-darwin-arm64": "^1.1.5",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -37,6 +36,10 @@
     "vite": "8.1.4",
     "vitest": "4.1.10",
     "wait-on": "^9.0.4"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-darwin-arm64": "^1.1.5",
+    "@rolldown/binding-win32-x64-msvc": "^1.1.5"
   },
   "build": {
     "appId": "com.dmconnect",

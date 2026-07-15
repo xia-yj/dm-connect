@@ -37,6 +37,12 @@ interface TableDesignerState {
   focusColumnName?: string;
 }
 
+interface TabContextMenuState {
+  x: number;
+  y: number;
+  tab: WorkspaceTab;
+}
+
 const welcomeTab: WorkspaceTab = { id: "welcome", type: "welcome", title: "概览" };
 const defaultUpdateManifestUrl = "https://github.com/xia-yj/dm-connect/releases/latest/download/update.json";
 const legacyUpdateManifestUrl = "http://10.20.25.68:8093/dm-connect-updates/update.json";
@@ -52,6 +58,7 @@ export default function App() {
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set());
   const [tabs, setTabs] = useState<WorkspaceTab[]>([welcomeTab]);
   const [activeTabId, setActiveTabId] = useState("welcome");
+  const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [connectionModal, setConnectionModal] = useState<ConnectionProfile | "new" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -313,6 +320,11 @@ export default function App() {
     if (activeTabId === tabId) setActiveTabId("welcome");
   }
 
+  function closeTabs(targetTabs: WorkspaceTab[]) {
+    setTabContextMenu(null);
+    void Promise.all(targetTabs.filter(tab => tab.type !== "welcome").map(tab => closeTab(tab)));
+  }
+
   async function closePending(action: "COMMIT" | "ROLLBACK") {
     if (!pendingClose) return;
     const { tab } = pendingClose;
@@ -463,13 +475,18 @@ export default function App() {
           </div>
         </header>
 
-        <div className="workspace-tabbar">
-          <div className="workspace-tabs">{tabs.map(tab => <button key={tab.id} className={activeTabId === tab.id ? "active" : ""} onClick={() => setActiveTabId(tab.id)}>
+        <div className="workspace-tabbar" onMouseDown={() => tabContextMenu && setTabContextMenu(null)}>
+          <div className="workspace-tabs">{tabs.map(tab => <button key={tab.id} className={activeTabId === tab.id ? "active" : ""} onClick={() => setActiveTabId(tab.id)} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setTabContextMenu({ tab, x: event.clientX, y: event.clientY }); }}>
             {tab.type === "welcome" ? <Database size={14} /> : tab.type === "sql" ? <Code2 size={14} /> : <Database size={14} />}
             <span>{tab.title}</span>
             {tab.type !== "welcome" && <i role="button" aria-label={`关闭 ${tab.title}`} onClick={event => { event.stopPropagation(); void closeTab(tab); }}><X size={12} /></i>}
           </button>)}</div>
           <button className="new-tab-button" onClick={() => newSql()} title="新建 SQL 标签"><Plus size={15} /></button>
+          {tabContextMenu && <div className="tab-context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }} onMouseDown={event => event.stopPropagation()}>
+            <button onClick={() => closeTabs([tabContextMenu.tab])} disabled={tabContextMenu.tab.type === "welcome"}>关闭</button>
+            <button onClick={() => closeTabs(tabs.filter(tab => tab.id !== tabContextMenu.tab.id && tab.type !== "welcome"))} disabled={tabs.filter(tab => tab.type !== "welcome" && tab.id !== tabContextMenu.tab.id).length === 0}>关闭其他</button>
+            <button onClick={() => closeTabs(tabs.slice(tabs.findIndex(tab => tab.id === tabContextMenu.tab.id) + 1))} disabled={tabs.slice(tabs.findIndex(tab => tab.id === tabContextMenu.tab.id) + 1).every(tab => tab.type === "welcome")}>关闭右侧</button>
+          </div>}
         </div>
 
         <div className="workspace-content">

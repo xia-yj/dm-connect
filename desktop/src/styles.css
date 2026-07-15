@@ -184,6 +184,10 @@ details summary::-webkit-details-marker { display: none; }
 .object-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-context-menu { position: fixed; z-index: 1200; min-width: 132px; padding: 5px; border: 1px solid #cfd9e6; border-radius: 9px; background: #fff; box-shadow: 0 10px 26px rgba(29, 48, 75, .2); }
 .tree-context-menu button { width: 100%; min-height: 33px; padding: 6px 10px; border: 0; border-radius: 6px; color: #3f5066; background: transparent; text-align: left; font-size: 12px; }.tree-context-menu button:hover { color: #195bb8; background: #eaf2fe; }
+.tab-context-menu { position: fixed; z-index: 1200; min-width: 132px; padding: 5px; border: 1px solid #cfd9e6; border-radius: 9px; background: #fff; box-shadow: 0 10px 26px rgba(29, 48, 75, .2); }
+.tab-context-menu button { width: 100%; min-height: 33px; padding: 6px 10px; border: 0; border-radius: 6px; color: #3f5066; background: transparent; text-align: left; font-size: 12px; }
+.tab-context-menu button:hover:not(:disabled) { color: #195bb8; background: #eaf2fe; }
+.tab-context-menu button:disabled { color: #b7c0cc; cursor: not-allowed; }
 .tree-message { display: block; padding: 5px 6px; color: #586982; font-size: 8px; }
 .sidebar-footer { padding: 10px 12px 12px; border-top: 1px solid rgba(255,255,255,.055); }
 .active-connection { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: #9facbf; font-size: 9px; }

@@ -38,7 +38,17 @@ jobs:
           retention-days: 14
 
   build-macos:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            artifact: DM-Connect-macOS-arm64
+          - runner: macos-15-intel
+            arch: x64
+            artifact: DM-Connect-macOS-x64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -56,13 +66,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
-      - name: Build macOS arm64 packages
+      - name: Build macOS ${{ matrix.arch }} packages
         shell: bash
-        run: ./scripts/package-macos.sh arm64
+        run: ./scripts/package-macos.sh ${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DM-Connect-macOS-arm64
+          name: ${{ matrix.artifact }}
           path: |
             target/installer/*.dmg
             target/installer/*.app.zip

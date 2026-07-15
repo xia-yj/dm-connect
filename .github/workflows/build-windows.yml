@@ -78,3 +78,39 @@ jobs:
             target/installer/*.app.zip
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build
+      - build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DM-Connect-Windows-x64
+          path: dist/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: DM-Connect-macOS-arm64
+          path: dist/macos-arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: DM-Connect-macOS-x64
+          path: dist/macos-x64
+
+      - name: Create GitHub Release and upload installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/windows/* \
+            dist/macos-arm64/* \
+            dist/macos-x64/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "DM Connect $GITHUB_REF_NAME" \
+            --generate-notes

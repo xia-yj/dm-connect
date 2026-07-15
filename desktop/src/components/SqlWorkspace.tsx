@@ -21,12 +21,13 @@ interface SqlWorkspaceProps {
   schemas: string[];
   tableSuggestions: DatabaseObject[];
   initialSql?: string;
+  onSqlChange?: (sql: string) => void;
 }
 
 type ExecuteMode = "SELECTION" | "CURRENT_STATEMENT" | "SCRIPT";
 type ColumnSuggestion = { schema: string; table: string; name: string; typeName: string; remarks: string | null };
 
-export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, schemas, tableSuggestions, initialSql = "" }: SqlWorkspaceProps) {
+export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, schemas, tableSuggestions, initialSql = "", onSqlChange }: SqlWorkspaceProps) {
   const dialect = sqlDialectConfig(databaseType);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -363,7 +364,11 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
           language="sql"
           theme="dm-connect-light"
           value={sql}
-          onChange={value => setSql(value ?? "")}
+          onChange={value => {
+            const nextSql = value ?? "";
+            setSql(nextSql);
+            onSqlChange?.(nextSql);
+          }}
           onMount={onMount}
           options={{
             automaticLayout: true,

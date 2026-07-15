@@ -7,6 +7,7 @@ declare global {
       selectDriver(): Promise<string | null>;
       saveCsv(defaultName: string): Promise<string | null>;
       saveSql(): Promise<string | null>;
+      saveLocalSql(defaultName: string, content: string): Promise<string | null>;
       checkForUpdate(manifestUrl: string): Promise<import("./types").AppUpdateInfo | null>;
       installUpdate(manifestUrl: string): Promise<void>;
       onUpdateCheck(listener: () => void): () => void;

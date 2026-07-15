@@ -182,6 +182,30 @@ function registerIpc(): void {
     const selected = await dialog.showSaveDialog(mainWindow!, { title: "导出 INSERT 语句", defaultPath: "table-inserts.sql", filters: [{ name: "SQL 文件", extensions: ["sql"] }] });
     return selected.canceled ? null : selected.filePath ?? null;
   });
+  ipcMain.handle("dialog:save-local-sql", async (event, defaultName: unknown, content: unknown) => {
+    if (!trustedUrl(event.senderFrame?.url ?? "")) return null;
+    if (typeof content !== "string") throw new Error("SQL 内容不正确");
+    if (content.length > 20 * 1024 * 1024) throw new Error("SQL 文件不能超过 20 MB");
+    const selected = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择 SQL 保存文件夹",
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const rawName = typeof defaultName === "string" ? defaultName : "query.sql";
+    const cleaned = rawName.trim().replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").slice(0, 120) || "query";
+    const stem = cleaned.toLowerCase().endsWith(".sql") ? cleaned.slice(0, -4) : cleaned;
+    for (let index = 1; index < 10000; index += 1) {
+      const suffix = index === 1 ? "" : `-${index}`;
+      const filePath = join(selected.filePaths[0], `${stem}${suffix}.sql`);
+      try {
+        await fs.writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
+        return filePath;
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+      }
+    }
+    throw new Error("无法生成不重复的 SQL 文件名");
+  });
   ipcMain.handle("update:check", async (event, manifestUrl: string) => {
     if (!trustedUrl(event.senderFrame?.url ?? "")) throw new Error("拒绝未知页面请求");
     return checkForUpdate(manifestUrl);

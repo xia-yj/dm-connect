@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CheckCircle2, CircleHelp, Code2, Database, FileUp, History, LoaderCircle, LockKeyhole,
+  CheckCircle2, CircleHelp, Code2, Database, FileUp, History, LoaderCircle, LockKeyhole, Save,
   Plus, RefreshCw, Settings, Unplug, X
 } from "lucide-react";
 import { asRpcError, errorMessage, rpc } from "./api";
@@ -61,6 +61,9 @@ export default function App() {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([welcomeTab]);
   const [activeTabId, setActiveTabId] = useState("welcome");
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabTitle, setEditingTabTitle] = useState("");
+  const [sqlByTabId, setSqlByTabId] = useState<Record<string, string>>({});
   const [connectionModal, setConnectionModal] = useState<ConnectionProfile | "new" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -299,6 +302,7 @@ export default function App() {
     try {
       const opened = await rpc<QueryOpenResult>("query.open", { profileId: profile.id });
       const id = `sql:${opened.sessionId}`;
+      setSqlByTabId(value => ({ ...value, [id]: initialSql }));
       setTabs(value => [...value, { id, type: "sql", title: `SQL · ${profile.name}`, profileId: profile.id, profileName: profile.name, databaseType: profile.databaseType, sessionId: opened.sessionId, initialSql }]);
       setActiveTabId(id);
       setStatus(`SQL 会话已创建 · ${profile.name}`);
@@ -323,7 +327,39 @@ export default function App() {
 
   function removeTab(tabId: string) {
     setTabs(value => value.filter(tab => tab.id !== tabId));
+    setSqlByTabId(value => {
+      if (!(tabId in value)) return value;
+      const next = { ...value };
+      delete next[tabId];
+      return next;
+    });
     if (activeTabId === tabId) setActiveTabId("welcome");
+  }
+
+  async function saveSqlTab(tab: Extract<WorkspaceTab, { type: "sql" }>) {
+    const content = sqlByTabId[tab.id] ?? tab.initialSql ?? "";
+    if (!content.trim()) {
+      setStatus("当前 SQL 为空，暂时无法保存");
+      return;
+    }
+    try {
+      const path = await window.dmConnect.saveLocalSql(tab.title, content);
+      if (path) setStatus(`SQL 已保存：${path}`);
+    } catch (cause) {
+      setStatus(`保存 SQL 失败：${errorMessage(cause)}`);
+    }
+  }
+
+  function beginTabRename(tab: WorkspaceTab) {
+    if (tab.type === "welcome") return;
+    setEditingTabId(tab.id);
+    setEditingTabTitle(tab.title);
+  }
+
+  function finishTabRename(tabId: string) {
+    const title = editingTabTitle.trim();
+    if (title) setTabs(value => value.map(tab => tab.id === tabId ? { ...tab, title } : tab));
+    setEditingTabId(null);
   }
 
   function closeTabs(targetTabs: WorkspaceTab[]) {
@@ -472,13 +508,15 @@ export default function App() {
         </header>
 
         <div className="workspace-tabbar" onMouseDown={() => tabContextMenu && setTabContextMenu(null)}>
-          <div className="workspace-tabs">{tabs.map(tab => <button key={tab.id} className={activeTabId === tab.id ? "active" : ""} onClick={() => setActiveTabId(tab.id)} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setTabContextMenu({ tab, x: event.clientX, y: event.clientY }); }}>
+          <div className="workspace-tabs">{tabs.map(tab => <button key={tab.id} className={activeTabId === tab.id ? "active" : ""} onClick={() => setActiveTabId(tab.id)} onDoubleClick={() => beginTabRename(tab)} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setTabContextMenu({ tab, x: event.clientX, y: event.clientY }); }}>
             {tab.type === "welcome" ? <Database size={14} /> : tab.type === "sql" ? <Code2 size={14} /> : <Database size={14} />}
-            <span>{tab.title}</span>
+            {editingTabId === tab.id ? <input className="workspace-tab-rename" value={editingTabTitle} autoFocus onChange={event => setEditingTabTitle(event.target.value)} onBlur={() => finishTabRename(tab.id)} onKeyDown={event => { if (event.key === "Enter") finishTabRename(tab.id); if (event.key === "Escape") setEditingTabId(null); }} onClick={event => event.stopPropagation()} /> : <span title={tab.type === "welcome" ? undefined : "双击重命名"}>{tab.title}</span>}
             {tab.type !== "welcome" && <i role="button" aria-label={`关闭 ${tab.title}`} onClick={event => { event.stopPropagation(); void closeTab(tab); }}><X size={12} /></i>}
           </button>)}</div>
           <button className="new-tab-button" onClick={() => newSql()} title="新建 SQL 标签"><Plus size={15} /></button>
           {tabContextMenu && <div className="tab-context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }} onMouseDown={event => event.stopPropagation()}>
+            {tabContextMenu.tab.type === "sql" && <button onClick={() => { const tab = tabContextMenu.tab; setTabContextMenu(null); if (tab.type === "sql") void saveSqlTab(tab); }}><Save size={14} />保存 SQL</button>}
+            {tabContextMenu.tab.type !== "welcome" && <button onClick={() => { const tab = tabContextMenu.tab; setTabContextMenu(null); beginTabRename(tab); }}>重命名</button>}
             <button onClick={() => closeTabs([tabContextMenu.tab])} disabled={tabContextMenu.tab.type === "welcome"}>关闭</button>
             <button onClick={() => closeTabs(tabs.filter(tab => tab.id !== tabContextMenu.tab.id && tab.type !== "welcome"))} disabled={tabs.filter(tab => tab.type !== "welcome" && tab.id !== tabContextMenu.tab.id).length === 0}>关闭其他</button>
             <button onClick={() => closeTabs(tabs.slice(tabs.findIndex(tab => tab.id === tabContextMenu.tab.id) + 1))} disabled={tabs.slice(tabs.findIndex(tab => tab.id === tabContextMenu.tab.id) + 1).every(tab => tab.type === "welcome")}>关闭右侧</button>
@@ -489,7 +527,7 @@ export default function App() {
           {tabs.map(tab => <div key={tab.id} className={`workspace-panel${activeTabId === tab.id ? " active" : ""}`}>
             {tab.type === "welcome" && <WelcomePanel data={data} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onConnect={profile => profile.connected ? setSelectedProfileId(profile.id) : connect(profile)} />}
             {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onEditTable={columnName => void editTable(tab.profileId, tab.result.object, columnName)} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
-            {tab.type === "sql" && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={tab.initialSql} />}
+            {tab.type === "sql" && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={tab.initialSql} onSqlChange={sql => setSqlByTabId(value => ({ ...value, [tab.id]: sql }))} />}
           </div>)}
         </div>
       </main>

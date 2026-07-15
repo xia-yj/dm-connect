@@ -221,6 +221,7 @@ details summary::-webkit-details-marker { display: none; }
 .workspace-tabs > button.active { height: 35px; background: white; color: #243148; border-color: #d8e0eb; }
 .workspace-tabs > button.active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
 .workspace-tabs > button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.workspace-tab-rename { min-width: 0; flex: 1; height: 22px; padding: 1px 4px; border: 1px solid #8eb5f1; border-radius: 4px; outline: none; background: #fff; color: #243148; font: inherit; }
 .workspace-tabs > button > i { width: 18px; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #9aa5b5; font-style: normal; opacity: 0; }
 .workspace-tabs > button:hover > i, .workspace-tabs > button.active > i { opacity: 1; }
 .workspace-tabs > button > i:hover { color: #344259; background: #e9edf3; }

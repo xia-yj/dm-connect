@@ -62,7 +62,13 @@ export function Sidebar(props: SidebarProps) {
   const [hiddenSchemas, setHiddenSchemas] = useState<Record<string, string[]>>(readHiddenSchemas);
   const active = props.profiles.find(profile => profile.id === props.selectedProfileId) ?? null;
   const needle = filter.trim().toLowerCase();
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; profileId: string; databaseType: DatabaseType; schema: string; object?: DatabaseObject; longRowEnabled?: boolean; loadingLongRow?: boolean; longRowStatusError?: boolean } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; profileId: string; databaseType: DatabaseType; schema: string; profile?: ConnectionProfile; object?: DatabaseObject; longRowEnabled?: boolean; loadingLongRow?: boolean; longRowStatusError?: boolean } | null>(null);
+  const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!props.selectedProfileId) return;
+    setExpandedProfiles(value => new Set(value).add(props.selectedProfileId!));
+  }, [props.selectedProfileId]);
   const schemaVisibilityRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
@@ -96,6 +102,12 @@ export function Sidebar(props: SidebarProps) {
         setContextMenu(current => current && current.object === object ? { ...current, loadingLongRow: false, longRowStatusError: true } : current);
       });
     }
+  }
+
+  function openProfileContextMenu(event: MouseEvent, profile: ConnectionProfile) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY, profileId: profile.id, databaseType: profile.databaseType, schema: "", profile });
   }
 
   function scrollTree(event: WheelEvent<HTMLDivElement>) {
@@ -158,26 +170,27 @@ export function Sidebar(props: SidebarProps) {
           return <div className={`connection-node${selected ? " selected" : ""}`} key={profile.id}>
             <button
               className="connection-row"
-              onClick={() => props.onSelectProfile(profile.id)}
+              onClick={() => {
+                if (selected) {
+                    setExpandedProfiles(value => {
+                    const next = new Set(value);
+                    if (next.has(profile.id)) next.delete(profile.id); else next.add(profile.id);
+                    return next;
+                  });
+                } else {
+                  props.onSelectProfile(profile.id);
+                  setExpandedProfiles(value => new Set(value).add(profile.id));
+                }
+              }}
               onDoubleClick={() => profile.connected ? props.onRefresh(profile) : props.onConnect(profile)}
+              onContextMenu={event => openProfileContextMenu(event, profile)}
             >
               <span className={`connection-icon${profile.connected ? " online" : ""}`}><Database size={16} /></span>
               <span className="connection-copy"><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{profile.username}@{profile.host}:{profile.port}</small></span>
               <span className={`connection-dot${profile.connected ? " online" : ""}`} />
             </button>
 
-            {selected && <div className="connection-actions connection-actions-edit">
-              <button onClick={() => props.onEditConnection(profile)}>编辑</button>
-              <button onClick={() => props.onCopyConnection(profile)}><Copy size={12} />复制</button>
-              <button onClick={() => props.onDeleteConnection(profile)}><Trash2 size={12} />删除</button>
-            </div>}
-            {selected && <div className="connection-actions connection-actions-state">
-              {profile.connected
-                ? <><button onClick={() => props.onRefresh(profile)}><RefreshCw size={12} />刷新</button><button onClick={() => props.onDisconnect(profile)}><Unplug size={12} />断开</button></>
-                : <button className="connect-action" onClick={() => props.onConnect(profile)}>连接</button>}
-            </div>}
-
-            {profile.connected && selected && <div className="schema-list">
+            {profile.connected && expandedProfiles.has(profile.id) && <div className="schema-list">
               <details className="schema-visibility" ref={schemaVisibilityRef}>
                 <summary><ListFilter size={14} /><span>库展示</span><em>{visibleSchemas.length}/{schemas.length}</em></summary>
                 <div className="schema-visibility-panel">
@@ -234,7 +247,16 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       {contextMenu && <div className="tree-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={event => event.stopPropagation()}>
-        {contextMenu.object
+        {contextMenu.profile
+          ? <>
+            <button onClick={() => { props.onEditConnection(contextMenu.profile!); setContextMenu(null); }}>编辑</button>
+            <button onClick={() => { props.onCopyConnection(contextMenu.profile!); setContextMenu(null); }}><Copy size={12} />复制</button>
+            <button onClick={() => { props.onDeleteConnection(contextMenu.profile!); setContextMenu(null); }}><Trash2 size={12} />删除</button>
+            {contextMenu.profile.connected
+              ? <><button onClick={() => { props.onRefresh(contextMenu.profile!); setContextMenu(null); }}><RefreshCw size={12} />刷新</button><button onClick={() => { props.onDisconnect(contextMenu.profile!); setContextMenu(null); }}><Unplug size={12} />断开</button></>
+              : <button className="connect-action" onClick={() => { props.onConnect(contextMenu.profile!); setContextMenu(null); }}>连接</button>}
+          </>
+          : contextMenu.object
           ? <><button onClick={() => { props.onEditTable(contextMenu.profileId, contextMenu.object!); setContextMenu(null); }}>编辑表</button>{contextMenu.databaseType === "dm" && <button disabled={contextMenu.loadingLongRow || contextMenu.longRowStatusError} onClick={() => { props.onSetLongRow(contextMenu.profileId, contextMenu.object!, !contextMenu.longRowEnabled); setContextMenu(null); }}>{contextMenu.loadingLongRow ? "正在读取超长记录状态…" : contextMenu.longRowStatusError ? "无法读取超长记录状态" : contextMenu.longRowEnabled ? "关闭超长记录" : "启用超长记录"}</button>}</>
           : <button onClick={() => { props.onNewTable(contextMenu.profileId, contextMenu.schema); setContextMenu(null); }}>新建表</button>}
       </div>}

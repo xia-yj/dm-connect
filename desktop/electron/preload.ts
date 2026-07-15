@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("dmConnect", {
   selectDriver: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-driver"),
   saveCsv: (defaultName: string): Promise<string | null> => ipcRenderer.invoke("dialog:save-csv", defaultName),
   saveSql: (): Promise<string | null> => ipcRenderer.invoke("dialog:save-sql"),
+  saveLocalSql: (defaultName: string, content: string): Promise<string | null> => ipcRenderer.invoke("dialog:save-local-sql", defaultName, content),
   checkForUpdate: (manifestUrl: string) => ipcRenderer.invoke("update:check", manifestUrl),
   installUpdate: (manifestUrl: string) => ipcRenderer.invoke("update:install", manifestUrl),
   onUpdateCheck: (listener: () => void) => {

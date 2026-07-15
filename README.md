@@ -1,4 +1,4 @@
-# DM Connect 2.0
+# DM Connect 2.0.11
 
 DM Connect 是支持 **达梦数据库（DM）与 MySQL** 的 macOS 数据库桌面工具。2.0 版使用 **React + Electron + Java 17 后端**：界面使用 React，JDBC、对象元数据、DDL、SQL 执行、事务、本地加密存储和数据导出核心由 Java 负责。
 
@@ -16,13 +16,15 @@ Java 17 后端（JDBC / 元数据 / SQL / 事务 / 本地加密存储 / CSV）
 
 支持功能：
 
-- 新建、编辑、复制、删除、测试和断开 DM / MySQL 连接，并按连接类型隔离 JDBC 驱动。
+- 新建、编辑、复制、删除、测试和断开 DM / MySQL 连接，并按连接类型隔离 JDBC 驱动；连接操作通过右键菜单使用。
+- 数据库连接卡片支持独立展开/收起库列表，多个连接可以同时展开。
 - 懒加载 DM 模式或 MySQL 数据库，以及表、视图、过程、函数和触发器；DM 连接同时支持序列。
 - 双击表名默认展示最多 100 行数据预览，同时可查看列、约束、索引和 DDL。
 - 按数据库类型创建和修改表，提供 DM / MySQL 对应的字段类型、DDL 与安全校验。
 - Monaco SQL 多标签工作台，每个标签拥有独立 JDBC 会话、事务状态和方言提示。
 - 执行选中内容、当前语句或整个脚本，可取消执行，支持多结果集。
 - `DROP` / `TRUNCATE` 二次确认，未提交标签关闭确认。
+- SQL 标签页支持右键保存当前脚本到本地文件夹、双击或右键重命名，保存时使用自定义标签名生成 `.sql` 文件。
 - 应用自动管理本机密钥，使用 Argon2id + AES-256-GCM 保存密码和最近 1000 条 SQL 历史。
 - 支持结果/整表 CSV 导出与表数据 INSERT SQL 导出。
 
@@ -117,21 +119,23 @@ npm run build
 
 ## 自动更新发布
 
-应用默认从同一更新服务器读取：
+应用默认从 GitHub Releases 读取更新清单：
 
 ```text
-http://10.20.25.68:8093/dm-connect-updates/update.json
+https://github.com/xia-yj/dm-connect/releases/latest/download/update.json
 ```
 
-也可以在应用“设置 → 应用更新”中改成其他地址。更新方式与同服务器的 mac-app 一致：应用下载包含完整 `.app` 的 ZIP，退出后由临时脚本替换旧应用并重新启动，因此首次仍应手动安装 DMG。
+也可以在应用“设置 → 应用更新”中改成其他地址。GitHub Actions 在推送 `v*` tag 时会自动同步桌面端版本、构建 Windows/macOS 安装包，并生成更新清单和 GitHub Release。应用下载包含完整 `.app` 的 ZIP，退出后由临时脚本替换旧应用并重新启动，因此首次仍应手动安装 DMG。
 
-每次发布时，在 Apple Silicon Mac 和 Intel Mac 分别运行：
+如果使用内网更新服务器，清单格式保持不变，只需在设置中填写服务器地址。
+
+手动发布时，在 Apple Silicon Mac 和 Intel Mac 分别运行：
 
 ```bash
 ./scripts/package-macos.sh
 ```
 
-分别得到 `DM-Connect-<版本>-arm64.app.zip` 与 `DM-Connect-<版本>-x64.app.zip`。上传两份 ZIP 和下面的清单到服务器的 `/opt/dm-connect-updates/`：
+分别得到 `DM-Connect-<版本>-arm64.app.zip` 与 `DM-Connect-<版本>-x64.app.zip`。版本号必须与 Git tag 一致（例如 tag 为 `v2.0.11` 时文件名使用 `2.0.11`），否则更新清单会指向不存在的文件。上传两份 ZIP 和下面的清单到服务器的 `/opt/dm-connect-updates/`：
 
 ```json
 {

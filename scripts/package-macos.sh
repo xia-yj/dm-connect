@@ -38,10 +38,11 @@ fi
 codesign --force --deep --sign - "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
-DMG_STAGE="$ROOT_DIR/target/dmg-stage"
+DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/dm-connect-dmg.XXXXXX")"
 DMG_PATH="$ROOT_DIR/target/installer/DM Connect-$APP_VERSION-$ELECTRON_ARCH.dmg"
-rm -rf "$DMG_STAGE"
-mkdir -p "$DMG_STAGE" "$ROOT_DIR/target/installer"
+mkdir -p "$ROOT_DIR/target/installer"
+rm -f "$DMG_PATH"
+trap 'rm -rf "$DMG_STAGE"' EXIT
 ditto "$APP_PATH" "$DMG_STAGE/DM Connect.app"
 ln -s /Applications "$DMG_STAGE/Applications"
 hdiutil create -volname "DM Connect" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null

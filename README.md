@@ -127,40 +127,6 @@ https://github.com/xia-yj/dm-connect/releases/latest/download/update.json
 
 也可以在应用“设置 → 应用更新”中改成其他地址。GitHub Actions 在推送 `v*` tag 时会自动同步桌面端版本、构建 Windows/macOS 安装包，并生成更新清单和 GitHub Release。应用下载包含完整 `.app` 的 ZIP，退出后由临时脚本替换旧应用并重新启动，因此首次仍应手动安装 DMG。
 
-如果使用内网更新服务器，清单格式保持不变，只需在设置中填写服务器地址。
-
-手动发布时，在 Apple Silicon Mac 和 Intel Mac 分别运行：
-
-```bash
-./scripts/package-macos.sh
-```
-
-分别得到 `DM-Connect-<版本>-arm64.app.zip` 与 `DM-Connect-<版本>-x64.app.zip`。版本号必须与 Git tag 一致（例如 tag 为 `v2.0.11` 时文件名使用 `2.0.11`），否则更新清单会指向不存在的文件。上传两份 ZIP 和下面的清单到服务器的 `/opt/dm-connect-updates/`：
-
-```json
-{
-  "version": "2.1.0",
-  "build": "1",
-  "arm64Url": "http://10.20.25.68:8093/dm-connect-updates/DM-Connect-2.1.0-arm64.app.zip",
-  "x64Url": "http://10.20.25.68:8093/dm-connect-updates/DM-Connect-2.1.0-x64.app.zip",
-  "notes": "本次更新说明"
-}
-```
-
-Nginx 在现有 8093 站点中增加：
-
-```nginx
-location /dm-connect-updates/ {
-    alias /opt/dm-connect-updates/;
-    autoindex off;
-    add_header Cache-Control "no-cache";
-    types {
-        application/json json;
-        application/zip zip;
-    }
-}
-```
-
 ## 当前边界
 
 - 当前支持达梦数据库、MySQL 和中文界面。

@@ -22,6 +22,7 @@ const allowedMethods = new Set([
 
 const bridge = new JavaBridge();
 let mainWindow: BrowserWindow | null = null;
+let isQuitting = false;
 
 interface UpdateManifest {
   version: string;
@@ -247,6 +248,12 @@ async function createWindow(): Promise<void> {
       webviewTag: false
     }
   });
+  mainWindow.on("close", event => {
+    if (process.platform === "darwin" && !isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!trustedUrl(url)) event.preventDefault();
@@ -305,4 +312,4 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();
 });
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => bridge.close());
+app.on("before-quit", () => { isQuitting = true; bridge.close(); });

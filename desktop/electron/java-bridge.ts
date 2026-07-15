@@ -31,7 +31,7 @@ export class JavaBridge {
     const backendRoot = app.isPackaged
       ? join(process.resourcesPath, "backend")
       : join(app.getAppPath(), "..", "target", "electron-backend");
-    const javaExecutable = join(backendRoot, "runtime", "bin", "java");
+    const javaExecutable = join(backendRoot, "runtime", "bin", process.platform === "win32" ? "java.exe" : "java");
     const appJar = join(backendRoot, "app", "dm-connect.jar");
     const libraries = join(backendRoot, "app", "lib", "*");
     if (!existsSync(javaExecutable) || !existsSync(appJar)) {

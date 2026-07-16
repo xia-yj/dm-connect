@@ -34,6 +34,16 @@ class MySqlTableDdlBuilderTest {
     }
 
     @Test
+    void preservesCurrentTimestampOnUpdateClauses() {
+        Column updatedAt = new Column(null, "updated_at", "DATETIME", null, 6,
+                false, false, false, "CURRENT_TIMESTAMP(6)", "CURRENT_TIMESTAMP(6)", null);
+
+        assertThat(ddl.create(new Definition("app", "records", List.of(updatedAt), null)))
+                .isEqualTo("CREATE TABLE `app`.`records` (`updated_at` DATETIME(6) NOT NULL "
+                        + "DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6))");
+    }
+
+    @Test
     void combinesDropsChangesAndAddsIntoOneMysqlAlterTableStatement() {
         Definition original = new Definition("app", "items", List.of(
                 column("id", "id", "BIGINT", null, null, false, true, true, null, null),
@@ -127,6 +137,6 @@ class MySqlTableDdlBuilderTest {
                                  boolean nullable, boolean primaryKey, boolean autoIncrement,
                                  String defaultExpression, String remark) {
         return new Column(original, name, type, length, scale, nullable, primaryKey, autoIncrement,
-                defaultExpression, remark);
+                defaultExpression, null, remark);
     }
 }

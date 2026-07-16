@@ -197,6 +197,7 @@ final class MySqlMetadataProvider implements MetadataProvider {
                             "YES".equalsIgnoreCase(rows.getString("IS_NULLABLE")),
                             defaultExpression(dataType, rawDefault),
                             containsWord(extra, "auto_increment"),
+                            onUpdateExpression(extra),
                             remark,
                             safety.editable(),
                             safety.warning()));
@@ -219,7 +220,10 @@ final class MySqlMetadataProvider implements MetadataProvider {
                 || normalizedExtra.contains("stored generated")) {
             warnings.add("是生成列");
         }
-        if (normalizedExtra.contains("default_generated")) warnings.add("含生成式默认值");
+        if (normalizedExtra.contains("default_generated")
+                && !isSupportedGeneratedDefault(dataType, rawDefault)) {
+            warnings.add("含生成式默认值");
+        }
         if (rawDefault != null && (rawDefault.indexOf('\\') >= 0
                 || rawDefault.chars().anyMatch(Character::isISOControl))) {
             warnings.add("默认值含依赖 SQL 模式的转义字符");
@@ -232,7 +236,9 @@ final class MySqlMetadataProvider implements MetadataProvider {
         if (remark.indexOf('\\') >= 0 || remark.chars().anyMatch(Character::isISOControl)) {
             warnings.add("字段备注含依赖 SQL 模式的转义字符");
         }
-        if (normalizedExtra.contains("on update")) warnings.add("含 ON UPDATE 属性");
+        if (normalizedExtra.contains("on update") && onUpdateExpression(extra) == null) {
+            warnings.add("含无法无损解析的 ON UPDATE 属性");
+        }
         if (containsWord(normalizedExtra, "invisible")) warnings.add("是不可见列");
         String remainingExtra = normalizedExtra
                 .replace("auto_increment", "")
@@ -267,8 +273,7 @@ final class MySqlMetadataProvider implements MetadataProvider {
     static String defaultExpression(String dataType, String rawDefault) {
         if (rawDefault == null) return null;
         String upper = rawDefault.strip().toUpperCase(Locale.ROOT);
-        if ((dataType.equals("TIMESTAMP") || dataType.equals("DATETIME"))
-                && upper.matches("CURRENT_TIMESTAMP(?:\\([0-6]\\))?")) {
+        if (isSupportedGeneratedDefault(dataType, rawDefault)) {
             return upper;
         }
         if (Set.of("CHAR", "VARCHAR", "TINYTEXT", "TEXT", "MEDIUMTEXT", "LONGTEXT",
@@ -276,6 +281,21 @@ final class MySqlMetadataProvider implements MetadataProvider {
             return "'" + rawDefault.replace("\\", "\\\\").replace("'", "''") + "'";
         }
         return rawDefault;
+    }
+
+    static boolean isSupportedGeneratedDefault(String dataType, String rawDefault) {
+        if (rawDefault == null || !(dataType.equals("TIMESTAMP") || dataType.equals("DATETIME"))) {
+            return false;
+        }
+        return rawDefault.strip().toUpperCase(Locale.ROOT)
+                .matches("CURRENT_TIMESTAMP(?:\\([0-6]?\\))?");
+    }
+
+    static String onUpdateExpression(String extra) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)(?:^|\\s)on\\s+update\\s+(CURRENT_TIMESTAMP(?:\\([0-6]?\\))?)(?:\\s|$)")
+                .matcher(extra == null ? "" : extra.strip());
+        return matcher.find() ? matcher.group(1).toUpperCase(Locale.ROOT) : null;
     }
 
     static String designerType(String dataType, String columnType) {

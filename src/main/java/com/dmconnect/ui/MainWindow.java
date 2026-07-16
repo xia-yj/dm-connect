@@ -105,8 +105,8 @@ public final class MainWindow implements AutoCloseable {
                 item("SQL 历史", this::showHistory),
                 item("清除已保存密码和 SQL 历史", this::clearLocalData));
 
-        Menu help = new Menu("帮助", null, item("关于 DM Connect", () -> Dialogs.info(stage,
-                "关于 DM Connect", "DM Connect 2.0.0 Legacy\nJavaFX 回退界面")));
+        Menu help = new Menu("帮助", null, item("关于数据库连接工具", () -> Dialogs.info(stage,
+                "关于数据库连接工具", "数据库连接工具 2.0.0 Legacy\nJavaFX 回退界面")));
         MenuBar menuBar = new MenuBar(file, connection, tools, help);
         menuBar.setUseSystemMenuBar(true);
         return menuBar;
@@ -115,7 +115,7 @@ public final class MainWindow implements AutoCloseable {
     private HBox buildHeader() {
         Label logo = new Label("DM");
         logo.getStyleClass().add("brand-mark");
-        Label title = new Label("DM Connect");
+        Label title = new Label("数据库连接工具");
         title.getStyleClass().add("brand-title");
         Label subtitle = new Label("达梦数据库工作台");
         subtitle.getStyleClass().add("brand-subtitle");

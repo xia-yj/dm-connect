@@ -7,7 +7,7 @@
     <groupId>com.dmconnect</groupId>
     <artifactId>dm-connect</artifactId>
     <version>2.0.6</version>
-    <name>DM Connect</name>
+    <name>数据库连接工具</name>
     <description>支持多种关系型与原生数据库的轻量桌面连接与查询工具</description>
 
     <properties>

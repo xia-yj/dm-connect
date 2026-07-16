@@ -31,7 +31,8 @@ public final class DmTableDdlBuilder {
     }
 
     public record Column(String originalName, String name, String type, Integer length, Integer scale,
-                         boolean nullable, boolean primaryKey, boolean autoIncrement, String defaultExpression, String remark) { }
+                         boolean nullable, boolean primaryKey, boolean autoIncrement, String defaultExpression,
+                         String onUpdateExpression, String remark) { }
 
     public record Definition(String schema, String name, List<Column> columns, String primaryKeyName) {
         public Definition {
@@ -150,6 +151,9 @@ public final class DmTableDdlBuilder {
         }
         if (column.autoIncrement() && !type.equals("INT") && !type.equals("BIGINT")) {
             throw new RpcException("INVALID_ARGUMENT", "达梦自增字段仅支持 INT 或 BIGINT");
+        }
+        if (column.onUpdateExpression() != null && !column.onUpdateExpression().isBlank()) {
+            throw new RpcException("INVALID_ARGUMENT", "达梦字段不支持 MySQL ON UPDATE 属性");
         }
         defaultExpression(column.defaultExpression());
         remark(column.remark());

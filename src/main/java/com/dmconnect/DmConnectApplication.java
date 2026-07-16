@@ -14,7 +14,7 @@ public final class DmConnectApplication extends Application {
         try {
             context = new AppContext();
             mainWindow = new MainWindow(stage, context);
-            stage.setTitle("DM Connect");
+            stage.setTitle("数据库连接工具");
             stage.setMinWidth(1100);
             stage.setMinHeight(700);
             stage.setScene(mainWindow.scene());

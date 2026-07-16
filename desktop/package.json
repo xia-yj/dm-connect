@@ -43,7 +43,7 @@
   },
   "build": {
     "appId": "com.dmconnect",
-    "productName": "DM Connect",
+    "productName": "数据库连接工具",
     "asar": true,
     "directories": {
       "output": "../target/electron"

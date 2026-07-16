@@ -87,7 +87,7 @@ function maxScale(databaseType: DatabaseType, column: TableColumnDraft): number 
 }
 
 function newColumn(): TableColumnDraft {
-  return { originalName: null, name: "", type: "VARCHAR", length: 100, scale: null, nullable: true, primaryKey: false, autoIncrement: false, defaultExpression: null, remark: null };
+  return { originalName: null, name: "", type: "VARCHAR", length: 100, scale: null, nullable: true, primaryKey: false, autoIncrement: false, defaultExpression: null, onUpdateExpression: null, remark: null };
 }
 
 function fromDetails(databaseType: DatabaseType, object: DatabaseObject, details: TableDetails): TableDefinitionDraft {
@@ -111,6 +111,7 @@ function fromDetails(databaseType: DatabaseType, object: DatabaseObject, details
         primaryKey: primaryNames.has(column.name.toUpperCase()),
         autoIncrement: column.autoIncrement,
         defaultExpression: column.defaultValue,
+        onUpdateExpression: column.onUpdateExpression,
         remark: column.remarks
       };
     })
@@ -146,7 +147,8 @@ export function TableDesignerModal({ databaseType, object, details, schema, focu
     const length = config.lengthTypes.has(type) ? (type === "BIT" ? column.length ?? 1 : column.length ?? 100)
       : config.precisionTypes.has(type) ? column.length ?? 18 : null;
     const scale = config.precisionTypes.has(type) || config.timeScaleTypes.has(type) ? column.scale ?? 0 : null;
-    changeColumn(index, { type, length, scale, autoIncrement: config.autoIncrementTypes.has(type) ? column.autoIncrement : false });
+    changeColumn(index, { type, length, scale, autoIncrement: config.autoIncrementTypes.has(type) ? column.autoIncrement : false,
+      onUpdateExpression: databaseType === "mysql" && (type === "DATETIME" || type === "TIMESTAMP") ? column.onUpdateExpression : null });
   }
 
   function move(index: number, delta: number) {
@@ -179,6 +181,11 @@ export function TableDesignerModal({ databaseType, object, details, schema, focu
       }
       if (column.autoIncrement && !config.autoIncrementTypes.has(column.type)) return `${config.label} 的 ${column.type} 类型不支持自增`;
       if (databaseType === "mysql" && column.autoIncrement && !column.primaryKey) return "MySQL 自增字段必须同时设为主键";
+      if (databaseType === "mysql" && column.onUpdateExpression
+        && (!(column.type === "DATETIME" || column.type === "TIMESTAMP")
+          || !/^CURRENT_TIMESTAMP(?:\([0-6]?\))?$/i.test(column.onUpdateExpression.trim()))) {
+        return "ON UPDATE 仅支持 DATETIME/TIMESTAMP 的 CURRENT_TIMESTAMP 及 0 到 6 位精度";
+      }
     }
     return "";
   }
@@ -189,12 +196,13 @@ export function TableDesignerModal({ databaseType, object, details, schema, focu
     const removed = editing && initial.columns.some(old => !definition.columns.some(column => column.originalName === old.originalName));
     const modified = editing && initial.columns.some(old => {
       const next = definition.columns.find(column => column.originalName === old.originalName);
-      return next && (next.type !== old.type || next.length !== old.length || next.scale !== old.scale || next.primaryKey !== old.primaryKey);
+      return next && (next.type !== old.type || next.length !== old.length || next.scale !== old.scale
+        || next.primaryKey !== old.primaryKey || next.onUpdateExpression !== old.onUpdateExpression);
     });
     if ((removed || modified) && !window.confirm(`该操作会执行 ${config.label} DDL，可能影响已有数据，且无法自动回滚。是否继续？`)) return;
     setBusy(true); setError("");
     try {
-      const target = { ...definition, name: definition.name.trim(), columns: definition.columns.map(column => ({ ...column, name: column.name.trim(), defaultExpression: column.defaultExpression?.trim() || null, remark: column.remark?.trim() || null })) };
+      const target = { ...definition, name: definition.name.trim(), columns: definition.columns.map(column => ({ ...column, name: column.name.trim(), defaultExpression: column.defaultExpression?.trim() || null, onUpdateExpression: column.onUpdateExpression?.trim() || null, remark: column.remark?.trim() || null })) };
       if (editing) await onAlter(initial, target); else await onCreate(target);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -205,13 +213,14 @@ export function TableDesignerModal({ databaseType, object, details, schema, focu
       <label className="field-label">{config.schemaLabel}<input className="field-input" value={definition.schema} readOnly /></label>
       <label className="field-label">表名<input className="field-input mono" autoFocus={!editing} value={definition.name} readOnly={editing} onChange={event => setDefinition({ ...definition, name: event.target.value })} /></label>
       <section className="table-columns-section"><header><div><strong>字段定义</strong><small>当前按 {config.label} 数据类型和参数规则校验。</small></div><button className="button secondary compact" onClick={() => setDefinition(current => ({ ...current, columns: [...current.columns, newColumn()] }))}><Plus size={15} />添加字段</button></header>
-        <div className="table-columns-grid table-columns-heading"><span>字段名</span><span>类型</span><span>长度/精度</span><span>小数位</span><span>默认值</span><span>备注</span><span>可空</span><span>主键</span><span>自增</span><span>操作</span></div>
+        <div className="table-columns-grid table-columns-heading"><span>字段名</span><span>类型</span><span>长度/精度</span><span>小数位</span><span>默认值</span><span>自动更新</span><span>备注</span><span>可空</span><span>主键</span><span>自增</span><span>操作</span></div>
         {definition.columns.map((column, index) => <div className="table-columns-grid" key={`${column.originalName ?? "new"}-${index}`}>
           <input className="field-input mono" autoFocus={editing && column.name === focusColumnName} value={column.name} onChange={event => changeColumn(index, { name: event.target.value })} />
           <select className="field-input" value={column.type} onChange={event => changeColumnType(index, column, event.target.value)}>{config.groups.map(group => <optgroup key={group.label} label={group.label}>{group.types.map(type => <option key={type}>{type}</option>)}</optgroup>)}</select>
           <input aria-label={`${column.name || index + 1}长度`} className="field-input" type="number" min="1" max={config.lengthTypes.has(column.type) || config.precisionTypes.has(column.type) ? maxLength(databaseType, column.type) : undefined} disabled={!(config.lengthTypes.has(column.type) || config.precisionTypes.has(column.type))} value={column.length ?? ""} onChange={event => changeColumn(index, { length: event.target.value === "" ? null : Number(event.target.value) })} />
           <input aria-label={`${column.name || index + 1}小数位`} className="field-input" type="number" min="0" max={config.precisionTypes.has(column.type) || config.timeScaleTypes.has(column.type) ? maxScale(databaseType, column) : undefined} disabled={!(config.precisionTypes.has(column.type) || config.timeScaleTypes.has(column.type))} value={column.scale ?? ""} onChange={event => changeColumn(index, { scale: event.target.value === "" ? null : Number(event.target.value) })} />
           <input aria-label={`${column.name || index + 1}默认值`} className="field-input mono" value={column.defaultExpression ?? ""} onChange={event => changeColumn(index, { defaultExpression: event.target.value || null })} placeholder="例如 0 或 '文本'" />
+          <input aria-label={`${column.name || index + 1}自动更新`} className="field-input mono" value={column.onUpdateExpression ?? ""} disabled={databaseType !== "mysql" || !(column.type === "DATETIME" || column.type === "TIMESTAMP")} onChange={event => changeColumn(index, { onUpdateExpression: event.target.value || null })} placeholder="CURRENT_TIMESTAMP" />
           <input aria-label={`${column.name || index + 1}备注`} className="field-input" value={column.remark ?? ""} onChange={event => changeColumn(index, { remark: event.target.value || null })} placeholder="中文备注" />
           <input aria-label={`${column.name || index + 1}可空`} type="checkbox" checked={column.primaryKey ? false : column.nullable} disabled={column.primaryKey} onChange={event => changeColumn(index, { nullable: event.target.checked })} />
           <input aria-label={`${column.name || index + 1}主键`} type="checkbox" checked={column.primaryKey} onChange={event => changeColumn(index, { primaryKey: event.target.checked, nullable: event.target.checked ? false : column.nullable })} />

@@ -26,9 +26,9 @@ npm test
 npm run build
 CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dir --"$ELECTRON_ARCH"
 
-APP_PATH="$ROOT_DIR/target/electron/mac-$ELECTRON_ARCH/DM Connect.app"
+APP_PATH="$ROOT_DIR/target/electron/mac-$ELECTRON_ARCH/数据库连接工具.app"
 if [[ ! -d "$APP_PATH" ]]; then
-  APP_PATH="$(find "$ROOT_DIR/target/electron" -maxdepth 2 -type d -name 'DM Connect.app' -print -quit)"
+  APP_PATH="$(find "$ROOT_DIR/target/electron" -maxdepth 2 -type d -name '数据库连接工具.app' -print -quit)"
 fi
 if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
   echo "Electron 应用包生成失败" >&2
@@ -39,13 +39,13 @@ codesign --force --deep --sign - "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/dm-connect-dmg.XXXXXX")"
-DMG_PATH="$ROOT_DIR/target/installer/DM Connect-$APP_VERSION-$ELECTRON_ARCH.dmg"
+DMG_PATH="$ROOT_DIR/target/installer/数据库连接工具-$APP_VERSION-$ELECTRON_ARCH.dmg"
 mkdir -p "$ROOT_DIR/target/installer"
 rm -f "$DMG_PATH"
 trap 'rm -rf "$DMG_STAGE"' EXIT
-ditto "$APP_PATH" "$DMG_STAGE/DM Connect.app"
+ditto "$APP_PATH" "$DMG_STAGE/数据库连接工具.app"
 ln -s /Applications "$DMG_STAGE/Applications"
-hdiutil create -volname "DM Connect" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
+hdiutil create -volname "数据库连接工具" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
 codesign --force --sign - "$DMG_PATH"
 codesign --verify --verbose=2 "$DMG_PATH"
 hdiutil verify "$DMG_PATH" >/dev/null

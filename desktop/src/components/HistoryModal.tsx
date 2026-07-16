@@ -7,9 +7,10 @@ import { ConfirmModal, Modal } from "./Modal";
 interface HistoryModalProps {
   onClose: () => void;
   onOpen: (entry: HistoryEntry) => void;
+  onHistoryChanged?: () => void;
 }
 
-export function HistoryModal({ onClose, onOpen }: HistoryModalProps) {
+export function HistoryModal({ onClose, onOpen, onHistoryChanged }: HistoryModalProps) {
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -37,12 +38,14 @@ export function HistoryModal({ onClose, onOpen }: HistoryModalProps) {
 
   async function remove(entry: HistoryEntry) {
     await rpc("history.delete", { historyId: entry.id });
+    onHistoryChanged?.();
     await load();
   }
 
   async function clear() {
     setConfirmClear(false);
     await rpc("history.clear");
+    onHistoryChanged?.();
     await load();
   }
 

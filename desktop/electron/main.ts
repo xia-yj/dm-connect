@@ -116,7 +116,7 @@ set -e
 ARCHIVE=${shellQuote(archive)}
 CURRENT_APP=${shellQuote(currentApp)}
 APP_PARENT=${shellQuote(parent)}
-APP_NAME=${shellQuote(currentApp.split("/").pop() ?? "DM Connect.app")}
+APP_NAME=${shellQuote(currentApp.split("/").pop() ?? "数据库连接工具.app")}
 WORK_DIR="$(mktemp -d /tmp/dm-connect-update.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"; rm -f "$ARCHIVE"; rm -f "$0"' EXIT
 while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done
@@ -258,7 +258,7 @@ async function createWindow(): Promise<void> {
     minHeight: 760,
     show: false,
     backgroundColor: "#0b1020",
-    title: "DM Connect",
+    title: "数据库连接工具",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 18, y: 18 },
     webPreferences: {
@@ -289,16 +289,16 @@ async function createWindow(): Promise<void> {
 function installMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: "DM Connect",
+      label: "数据库连接工具",
       submenu: [
-        { role: "about", label: "关于 DM Connect" },
+        { role: "about", label: "关于数据库连接工具" },
         { label: "检查更新…", click: () => mainWindow?.webContents.send("update:check") },
         { type: "separator" },
-        { role: "hide", label: "隐藏 DM Connect" },
+        { role: "hide", label: "隐藏数据库连接工具" },
         { role: "hideOthers", label: "隐藏其他" },
         { role: "unhide", label: "全部显示" },
         { type: "separator" },
-        { role: "quit", label: "退出 DM Connect" }
+        { role: "quit", label: "退出数据库连接工具" }
       ]
     },
     { label: "编辑", submenu: [{ role: "undo", label: "撤销" }, { role: "redo", label: "重做" }, { type: "separator" }, { role: "cut", label: "剪切" }, { role: "copy", label: "复制" }, { role: "paste", label: "粘贴" }, { role: "selectAll", label: "全选" }] },
@@ -324,7 +324,7 @@ else {
       if (!process.env.VITE_DEV_SERVER_URL) await registerAppProtocol();
       await createWindow();
     } catch (cause) {
-      dialog.showErrorBox("DM Connect 启动失败", cause instanceof Error ? cause.message : String(cause));
+      dialog.showErrorBox("数据库连接工具启动失败", cause instanceof Error ? cause.message : String(cause));
       app.quit();
     }
   });

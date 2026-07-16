@@ -1,5 +1,5 @@
 import {
-  Braces, ChevronDown, CircleDot, Code2, Copy, Database, Download, FileCode2, FunctionSquare,
+  Braces, ChevronDown, CircleDot, Code2, Copy, Database, FileCode2, FunctionSquare,
   Layers3, ListFilter, Plus, RefreshCw, Search, Table2, Trash2, Unplug, View
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from "react";
@@ -37,10 +37,6 @@ interface SidebarProps {
   onEditTable: (profileId: string, object: DatabaseObject) => void;
   onGetLongRowStatus: (profileId: string, object: DatabaseObject) => Promise<boolean>;
   onSetLongRow: (profileId: string, object: DatabaseObject, enabled: boolean) => void;
-  onCheckUpdate: () => void;
-  updateAvailable: boolean;
-  checkingUpdate: boolean;
-  installingUpdate: boolean;
 }
 
 function objectKey(profileId: string, schema: string, kind: DatabaseObjectKind) {
@@ -146,7 +142,6 @@ export function Sidebar(props: SidebarProps) {
     <aside className="sidebar" style={{ width: props.width, minWidth: props.width, maxWidth: props.width }}>
       <div className="sidebar-drag" aria-label="窗口拖拽区域">
         <Brand compact />
-        <button className={`sidebar-update-button${props.updateAvailable ? " ready" : ""}`} onClick={props.onCheckUpdate} disabled={props.checkingUpdate || props.installingUpdate} title={props.updateAvailable ? "发现新版本，点击更新" : "检查更新"}><Download className={props.checkingUpdate ? "spin" : ""} size={15} />{props.updateAvailable ? "下载更新" : "检查更新"}</button>
       </div>
       <div className="sidebar-heading">
         <div className="sidebar-heading-copy">
@@ -187,7 +182,7 @@ export function Sidebar(props: SidebarProps) {
             >
               <span className={`connection-icon${profile.connected ? " online" : ""}`}><Database size={16} /></span>
               <span className="connection-copy"><span className="connection-name"><strong>{profile.name}</strong><em className={`database-type-badge ${profile.databaseType}`}>{databaseTypeLabel(profile.databaseType)}</em></span><small>{connectionSummary(profile)}</small></span>
-              <span className={`connection-dot${profile.connected ? " online" : ""}`} />
+              <span className={`connection-dot${profile.connected ? " online" : ""}`} title={profile.connected ? "已连接" : "未连接"} aria-label={profile.connected ? "已连接" : "未连接"} />
             </button>
 
             {profile.connected && !isNativeDatabase(profile.databaseType) && expandedProfiles.has(profile.id) && <div className="schema-list">
@@ -262,7 +257,7 @@ export function Sidebar(props: SidebarProps) {
       </div>}
 
       <footer className="sidebar-footer">
-        {active && <div className="active-connection"><span className={`connection-dot${active.connected ? " online" : ""}`} /><span>{active.name}</span><em className={`database-type-badge ${active.databaseType}`}>{databaseTypeLabel(active.databaseType)}</em><small>{active.connected ? "已连接" : "未连接"}</small></div>}
+        {active && <div className="active-connection"><span className={`connection-dot${active.connected ? " online" : ""}`} title={active.connected ? "已连接" : "未连接"} aria-label={active.connected ? "已连接" : "未连接"} /><span>{active.name}</span><em className={`database-type-badge ${active.databaseType}`}>{databaseTypeLabel(active.databaseType)}</em><small>{active.connected ? "已连接" : "未连接"}</small></div>}
       </footer>
     </aside>
   );

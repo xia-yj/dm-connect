@@ -597,7 +597,8 @@ public final class BackendService implements AutoCloseable {
             columns.add(new DmTableDdlBuilder.Column(
                     nullableText(item, "originalName"), requiredText(item, "name"), requiredText(item, "type"),
                     nullableInteger(item, "length"), nullableInteger(item, "scale"), item.path("nullable").asBoolean(true),
-                    item.path("primaryKey").asBoolean(false), item.path("autoIncrement").asBoolean(false), nullableText(item, "defaultExpression"), nullableText(item, "remark")));
+                    item.path("primaryKey").asBoolean(false), item.path("autoIncrement").asBoolean(false),
+                    nullableText(item, "defaultExpression"), nullableText(item, "onUpdateExpression"), nullableText(item, "remark")));
         }
         return new DmTableDdlBuilder.Definition(requiredText(node, "schema"), requiredText(node, "name"), columns,
                 nullableText(node, "primaryKeyName"));

@@ -15,8 +15,30 @@ class MySqlMetadataProviderTest {
                 .isEqualTo("'2026-07-15'");
         assertThat(MySqlMetadataProvider.defaultExpression("TIMESTAMP", "current_timestamp(6)"))
                 .isEqualTo("CURRENT_TIMESTAMP(6)");
+        assertThat(MySqlMetadataProvider.defaultExpression("TIMESTAMP", "current_timestamp()"))
+                .isEqualTo("CURRENT_TIMESTAMP()");
         assertThat(MySqlMetadataProvider.defaultExpression("INT", "42")).isEqualTo("42");
         assertThat(MySqlMetadataProvider.defaultExpression("VARCHAR", null)).isNull();
+    }
+
+    @Test
+    void acceptsOnlyLosslessCurrentTimestampGeneratedDefaults() {
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("TIMESTAMP", "CURRENT_TIMESTAMP")).isTrue();
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("TIMESTAMP", "current_timestamp()")).isTrue();
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("DATETIME", "current_timestamp(6)")).isTrue();
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("TIMESTAMP", "(uuid())")).isFalse();
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("VARCHAR", "CURRENT_TIMESTAMP")).isFalse();
+        assertThat(MySqlMetadataProvider.isSupportedGeneratedDefault("TIMESTAMP", null)).isFalse();
+    }
+
+    @Test
+    void extractsLosslessOnUpdateCurrentTimestampExpressions() {
+        assertThat(MySqlMetadataProvider.onUpdateExpression("DEFAULT_GENERATED on update CURRENT_TIMESTAMP"))
+                .isEqualTo("CURRENT_TIMESTAMP");
+        assertThat(MySqlMetadataProvider.onUpdateExpression("default_generated ON UPDATE current_timestamp(6)"))
+                .isEqualTo("CURRENT_TIMESTAMP(6)");
+        assertThat(MySqlMetadataProvider.onUpdateExpression("on update uuid()")).isNull();
+        assertThat(MySqlMetadataProvider.onUpdateExpression("auto_increment")).isNull();
     }
 
     @Test

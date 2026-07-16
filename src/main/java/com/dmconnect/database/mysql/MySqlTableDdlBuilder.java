@@ -189,6 +189,15 @@ public final class MySqlTableDdlBuilder {
         if (column.autoIncrement() && hasText(column.defaultExpression())) {
             throw new RpcException("INVALID_ARGUMENT", "AUTO_INCREMENT 字段不能设置默认值");
         }
+        if (hasText(column.onUpdateExpression())) {
+            if (!TIME_SCALE_TYPES.contains(type) || type.equals("TIME")) {
+                throw new RpcException("INVALID_ARGUMENT", "MySQL ON UPDATE 仅支持 DATETIME 或 TIMESTAMP 字段");
+            }
+            if (!column.onUpdateExpression().strip().toUpperCase(Locale.ROOT)
+                    .matches("CURRENT_TIMESTAMP(?:\\([0-6]?\\))?")) {
+                throw new RpcException("INVALID_ARGUMENT", "ON UPDATE 仅支持 CURRENT_TIMESTAMP 及 0 到 6 位精度");
+            }
+        }
         if (column.primaryKey() && UNSUPPORTED_PRIMARY_KEY_TYPES.contains(type)) {
             throw new RpcException("INVALID_ARGUMENT", type + " 不能由当前表设计器直接定义为主键");
         }
@@ -211,6 +220,9 @@ public final class MySqlTableDdlBuilder {
         if (!column.nullable() || column.primaryKey()) value.append(" NOT NULL");
         if (hasText(column.defaultExpression())) {
             value.append(" DEFAULT ").append(normalizedDefault(column.defaultExpression()));
+        }
+        if (hasText(column.onUpdateExpression())) {
+            value.append(" ON UPDATE ").append(column.onUpdateExpression().strip().toUpperCase(Locale.ROOT));
         }
         if (column.autoIncrement()) value.append(" AUTO_INCREMENT");
         if (hasText(column.remark())) {
@@ -237,6 +249,7 @@ public final class MySqlTableDdlBuilder {
                 || old.primaryKey() != next.primaryKey()
                 || old.autoIncrement() != next.autoIncrement()
                 || !normalizedDefault(old.defaultExpression()).equals(normalizedDefault(next.defaultExpression()))
+                || !normalizedDefault(old.onUpdateExpression()).equals(normalizedDefault(next.onUpdateExpression()))
                 || !normalizedRemark(old.remark()).equals(normalizedRemark(next.remark()));
     }
 

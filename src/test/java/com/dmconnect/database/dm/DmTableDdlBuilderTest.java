@@ -14,7 +14,7 @@ class DmTableDdlBuilderTest {
     @Test
     void buildsQuotedDmCreateTableWithPrimaryKey() {
         String sql = ddl.create(new DmTableDdlBuilder.Definition("SMP", "ORDERS", List.of(
-                new DmTableDdlBuilder.Column(null, "ID", "BIGINT", null, null, false, true, true, null, "主键"),
+                new DmTableDdlBuilder.Column(null, "ID", "BIGINT", null, null, false, true, true, null, null, "主键"),
                 column(null, "NAME", "VARCHAR", 100, null, true, false, "'new'"),
                 column(null, "CREATED_AT", "TIMESTAMP", 36, 0, true, false, null)
         ), null));
@@ -22,7 +22,7 @@ class DmTableDdlBuilderTest {
         assertThat(sql).startsWith("CREATE TABLE \"SMP\".\"ORDERS\" (");
         assertThat(sql).contains("\"ID\" BIGINT AUTO_INCREMENT NOT NULL", "\"NAME\" VARCHAR(100) DEFAULT 'new'", "\"CREATED_AT\" TIMESTAMP(0)", "PRIMARY KEY (\"ID\")");
         assertThat(ddl.createComments(new DmTableDdlBuilder.Definition("SMP", "ORDERS", List.of(
-                new DmTableDdlBuilder.Column(null, "ID", "BIGINT", null, null, false, true, true, null, "主键")
+                new DmTableDdlBuilder.Column(null, "ID", "BIGINT", null, null, false, true, true, null, null, "主键")
         ), null))).containsExactly("COMMENT ON COLUMN \"SMP\".\"ORDERS\".\"ID\" IS '主键'");
     }
 
@@ -74,6 +74,7 @@ class DmTableDdlBuilderTest {
 
     private static DmTableDdlBuilder.Column column(String original, String name, String type, Integer length,
                                                      Integer scale, boolean nullable, boolean primaryKey, String defaultExpression) {
-        return new DmTableDdlBuilder.Column(original, name, type, length, scale, nullable, primaryKey, false, defaultExpression, null);
+        return new DmTableDdlBuilder.Column(original, name, type, length, scale, nullable, primaryKey, false,
+                defaultExpression, null, null);
     }
 }

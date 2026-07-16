@@ -187,7 +187,7 @@ final class GenericJdbcMetadata implements MetadataProvider {
                         rows.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
                         rows.getString("COLUMN_DEF"),
                         "YES".equalsIgnoreCase(safeString(rows, "IS_AUTOINCREMENT")),
-                        rows.getString("REMARKS"), false,
+                        null, rows.getString("REMARKS"), false,
                         "当前数据库首版请使用 SQL 工作台修改表结构"));
             }
         }

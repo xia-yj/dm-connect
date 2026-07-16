@@ -96,6 +96,7 @@ export interface ColumnInfo {
   nullable: boolean;
   defaultValue: string | null;
   autoIncrement: boolean;
+  onUpdateExpression: string | null;
   remarks: string | null;
   /** False when graphical ALTER would lose engine-specific column attributes. */
   safelyEditable?: boolean;
@@ -135,6 +136,7 @@ export interface TableColumnDraft {
   primaryKey: boolean;
   autoIncrement: boolean;
   defaultExpression: string | null;
+  onUpdateExpression: string | null;
   remark: string | null;
 }
 

@@ -1,6 +1,6 @@
-# DM Connect 2.0.11
+# 数据库连接工具 2.0.11
 
-DM Connect 是支持 DM、MySQL、MongoDB、Redis、PostgreSQL、Oracle、SQL Server 与 SQLite 的 macOS 数据库桌面工具。2.0 版使用 **React + Electron + Java 17 后端**：界面使用 React，JDBC、原生客户端、对象元数据、SQL 执行、事务、本地加密存储和数据导出核心由 Java 负责。
+数据库连接工具是支持 DM、MySQL、MongoDB、Redis、PostgreSQL、Oracle、SQL Server 与 SQLite 的 macOS 数据库桌面工具。2.0 版使用 **React + Electron + Java 17 后端**：界面使用 React，JDBC、原生客户端、对象元数据、SQL 执行、事务、本地加密存储和数据导出核心由 Java 负责。
 
 ## 架构
 

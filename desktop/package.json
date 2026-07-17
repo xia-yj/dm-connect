@@ -65,7 +65,11 @@
       "category": "public.app-category.developer-tools",
       "icon": "../target/icon.icns",
       "identity": null,
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "extendInfo": {
+        "CFBundleDisplayName": "数据库连接工具",
+        "CFBundleName": "数据库连接工具"
+      }
     },
     "win": {
       "target": "nsis"

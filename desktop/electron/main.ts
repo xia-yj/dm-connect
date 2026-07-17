@@ -11,6 +11,10 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "dmconnect", privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ]);
 
+// Keep the runtime application name in sync with the packaged macOS bundle
+// metadata, including when running an unpackaged development build.
+app.setName("数据库连接工具");
+
 const allowedMethods = new Set([
   "app.bootstrap", "app.ping", "storage.reset",
   "driver.list", "driver.import", "profile.list", "profile.save", "profile.copy", "profile.delete", "profile.test",
@@ -313,6 +317,10 @@ else {
   app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      // On macOS the close button intentionally hides the window so the
+      // application stays running. A second launch should bring that hidden
+      // window back to the foreground as well.
+      if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
     }
   });
@@ -331,6 +339,14 @@ else {
 }
 
 app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    // macOS emits `activate` when the Dock icon is clicked. The close handler
+    // hides (rather than destroys) the window, so explicitly show it here.
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();
 });
 app.on("window-all-closed", () => app.quit());

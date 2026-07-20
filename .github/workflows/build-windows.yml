@@ -75,7 +75,10 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
 
       - name: Install icon image dependency
-        run: python3 -m pip install --user Pillow
+        run: |
+          python3 -m venv "$RUNNER_TEMP/icon-venv"
+          "$RUNNER_TEMP/icon-venv/bin/pip" install Pillow
+          echo "$RUNNER_TEMP/icon-venv/bin" >> "$GITHUB_PATH"
 
       - name: Build macOS ${{ matrix.arch }} packages
         shell: bash

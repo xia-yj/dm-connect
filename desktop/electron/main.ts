@@ -135,7 +135,12 @@ rm -rf "$CURRENT_APP"
     const { spawn } = await import("node:child_process");
     spawn("/bin/bash", [scriptPath], { detached: true, stdio: "ignore" }).unref();
     sendUpdateStatus("更新包已准备好，正在重启…");
-    setTimeout(() => app.quit(), 200);
+    setTimeout(() => {
+      // macOS 的窗口 close handler 默认会拦截退出并隐藏窗口；更新脚本
+      // 必须等 Electron 进程真正退出后才能替换 .app。
+      isQuitting = true;
+      app.quit();
+    }, 200);
   } catch (cause) {
     await fs.rm(archive, { force: true });
     throw cause;

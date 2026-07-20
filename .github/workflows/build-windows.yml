@@ -74,6 +74,9 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Install icon image dependency
+        run: python3 -m pip install --user Pillow
+
       - name: Build macOS ${{ matrix.arch }} packages
         shell: bash
         run: ./scripts/package-macos.sh ${{ matrix.arch }}

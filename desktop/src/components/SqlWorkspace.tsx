@@ -7,10 +7,9 @@ import {
 } from "lucide-react";
 import { asRpcError, errorMessage, rpc } from "../api";
 import { sqlDialectConfig } from "../sqlDialect";
-import type { DatabaseObject, DatabaseType, ExecutionResult, ObjectLoadResult, PagedResultTable, QueryStatus, StatementOutcome } from "../types";
+import type { DatabaseObject, DatabaseType, ExecutionResult, ObjectLoadResult, QueryStatus, StatementOutcome } from "../types";
 import { DataGrid } from "./DataGrid";
 import { ConfirmModal } from "./Modal";
-import { ObjectView } from "./ObjectView";
 import "../monaco";
 
 interface SqlWorkspaceProps {
@@ -46,7 +45,6 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
   const [autoCommit, setAutoCommitState] = useState(true);
   const [pendingTransaction, setPendingTransaction] = useState(false);
   const maxRows = 100;
-  const [tablePreview, setTablePreview] = useState<ObjectLoadResult | null>(null);
   const [editorHeight, setEditorHeight] = useState(() => Number(localStorage.getItem("dm-connect.sql-editor-height")) || 390);
   const [resizingResults, setResizingResults] = useState(false);
   const [message, setMessage] = useState("SQL 会话已就绪");
@@ -221,13 +219,12 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
   }
 
   function simpleTable(sqlText: string): DatabaseObject | null {
-    const match = sqlText.trim().match(/^SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)\s*;?$/i);
+    const match = sqlText.trim().match(/^SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)(?:\s+WHERE\b[\s\S]*)?;?$/i);
     return match ? { schema: match[1], name: match[2], kind: "TABLE", remarks: "" } : null;
   }
 
   async function execute(mode: ExecuteMode, allowDangerous = false) {
     const source = simpleTable(sql);
-    setTablePreview(null);
     setBusy(true);
     setMessage("正在执行 SQL…");
     try {
@@ -240,21 +237,6 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
       setMessage(result.success
         ? `执行完成 · ${result.executedStatements} 条语句 · ${result.durationMillis} ms${result.historyWarning ? ` · 历史未保存：${result.historyWarning}` : ""}`
         : `执行失败 · ${result.errorMessage}`);
-      if (result.success && source) {
-        void rpc<ObjectLoadResult>("object.load", { profileId, ...source }).then(result => {
-          setTablePreview(result);
-          if (result.details) {
-            const current = suggestionsRef.current;
-            const key = `${source.schema.toLowerCase()}.${source.name.toLowerCase()}`;
-            suggestionsRef.current = {
-              ...current,
-              columns: [...current.columns.filter(column => `${column.schema.toLowerCase()}.${column.table.toLowerCase()}` !== key),
-                ...result.details.columns.map(column => ({ schema: source.schema, table: source.name, name: column.name, typeName: column.typeName, remarks: column.remarks }))]
-            };
-          }
-        })
-          .catch(cause => setMessage(`读取表预览失败：${errorMessage(cause)}`));
-      }
     } catch (cause) {
       const error = asRpcError(cause);
       if (error.code === "DANGEROUS_SQL") {
@@ -317,13 +299,20 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
     }
   }
 
-  async function loadTablePreview(object: DatabaseObject, page: number, filter: { column: string; operator: "=" | "LIKE"; value: string }[] | null): Promise<PagedResultTable> {
-    return rpc<PagedResultTable>("object.preview", { profileId, ...object, page, pageSize: 100, ...(filter ? { filters: filter } : {}) });
-  }
-
-  async function saveTableChanges(object: DatabaseObject, changes: { column: string; value: string | null; keyValues: Record<string, unknown> }[]) {
-    await rpc("object.updateCells", { profileId, ...object, changes });
-    setMessage(`已保存 ${changes.length} 项修改`);
+  async function deleteQueryResultRow(object: DatabaseObject, table: ExecutionResult["outcomes"][number]["table"], rowIndex: number) {
+    if (!table || !window.confirm("确认删除选中的数据行？此操作不可撤销。")) return;
+    const row = table.rows[rowIndex];
+    const rowValues = Object.fromEntries(table.columns.map((column, index) => [column.name, row[index]]));
+    try {
+      await rpc("object.deleteRow", { profileId, ...object, rowValues });
+      setMessage("已删除 1 行数据");
+      setExecution(current => current && ({ ...current, outcomes: current.outcomes.map((outcome, index) => index === activeOutcome && outcome.table
+        ? { ...outcome, table: { ...outcome.table, rows: outcome.table.rows.filter((_, index) => index !== rowIndex) } } : outcome) }));
+    } catch (cause) {
+      const message = errorMessage(cause);
+      setMessage(`删除失败：${message}`);
+      window.alert(`删除失败：${message}`);
+    }
   }
 
   async function exportTableInsert(object: DatabaseObject, scope: "CURRENT_PAGE" | "ALL", page: number, filter: { column: string; operator: "=" | "LIKE"; value: string }[] | null) {
@@ -409,7 +398,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
         <div className="result-content">
           {!execution && <div className="result-placeholder"><span><TerminalSquare size={28} /></span><strong>准备执行 SQL</strong><p>使用“执行当前”运行光标所在语句，或选择一段 SQL 后执行。</p></div>}
           {execution && activeOutcome === -1 && <div className="query-error"><AlertTriangle size={25} /><div><strong>{execution.errorMessage || "SQL 执行失败"}</strong><p>SQLState：{execution.sqlState || "—"}　错误码：{execution.vendorCode}</p></div></div>}
-          {selected?.table && (tablePreview ? <ObjectView compact result={tablePreview} onLoadPreview={(page, filter) => loadTablePreview(tablePreview.object, page, filter)} onSaveChanges={changes => saveTableChanges(tablePreview.object, changes)} onExportInsert={(scope, page, filter) => exportTableInsert(tablePreview.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tablePreview.object, scope, page, filter)} /> : <DataGrid table={selected.table} />)}
+          {selected?.table && <DataGrid table={selected.table} onDeleteRow={simpleTable(sql) ? rowIndex => void deleteQueryResultRow(simpleTable(sql)!, selected.table, rowIndex) : undefined} />}
           {selected && !selected.table && <div className="update-result"><CheckCheck size={28} /><strong>语句执行成功</strong><span>影响 {selected.updateCount ?? 0} 行</span></div>}
           {execution && execution.outcomes.length === 0 && execution.success && <div className="update-result"><CheckCheck size={28} /><strong>执行完成</strong><span>数据库未返回结果集或更新计数</span></div>}
         </div>

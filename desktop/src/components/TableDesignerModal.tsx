@@ -41,14 +41,14 @@ function rules(
 }
 
 const DM_TYPE_RULES = rules("达梦", "所属模式", [
-  { label: "字符", types: ["CHAR", "VARCHAR"] },
+  { label: "字符", types: ["CHAR", "VARCHAR", "VARCHAR2"] },
   { label: "精确数值", types: ["TINYINT", "BYTE", "SMALLINT", "INT", "INTEGER", "BIGINT", "NUMERIC", "DECIMAL", "DEC", "NUMBER"] },
   { label: "近似数值", types: ["REAL", "FLOAT", "DOUBLE", "DOUBLE PRECISION"] },
   { label: "二进制与位串", types: ["BIT", "BINARY", "VARBINARY"] },
   { label: "日期时间", types: ["DATE", "TIME", "TIMESTAMP", "DATETIME", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE"] },
   { label: "时间间隔", types: ["INTERVAL YEAR", "INTERVAL MONTH", "INTERVAL YEAR TO MONTH", "INTERVAL DAY", "INTERVAL HOUR", "INTERVAL MINUTE", "INTERVAL SECOND", "INTERVAL DAY TO HOUR", "INTERVAL DAY TO MINUTE", "INTERVAL DAY TO SECOND", "INTERVAL HOUR TO MINUTE", "INTERVAL HOUR TO SECOND", "INTERVAL MINUTE TO SECOND"] },
   { label: "多媒体与大对象", types: ["TEXT", "LONG", "LONGVARCHAR", "IMAGE", "LONGVARBINARY", "BLOB", "CLOB", "BFILE"] }
-], ["CHAR", "VARCHAR", "BINARY", "VARBINARY"], ["NUMERIC", "DECIMAL", "DEC", "NUMBER"], ["TIME", "TIMESTAMP", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE"], ["INT", "BIGINT"]);
+], ["CHAR", "VARCHAR", "VARCHAR2", "BINARY", "VARBINARY"], ["NUMERIC", "DECIMAL", "DEC", "NUMBER"], ["TIME", "TIMESTAMP", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE"], ["INT", "BIGINT"]);
 
 const MYSQL_TYPE_RULES = rules("MySQL", "所属数据库", [
   { label: "整数", types: ["TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT"] },

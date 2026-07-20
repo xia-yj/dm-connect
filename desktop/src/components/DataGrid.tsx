@@ -1,5 +1,5 @@
-import { AlertTriangle, Rows3 } from "lucide-react";
-import { useRef, useState } from "react";
+import { AlertTriangle, Rows3, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ColumnMetadata, ResultTable } from "../types";
 
 export function displayValue(value: unknown): string {
@@ -19,11 +19,27 @@ interface DataGridProps {
   onEditCell?: (rowIndex: number, column: ColumnMetadata, value: string | null) => void;
   isColumnEditable?: (column: ColumnMetadata) => boolean;
   editedCellKeys?: Set<string>;
+  onDeleteRow?: (rowIndex: number) => void;
 }
 
-export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = () => true, editedCellKeys = new Set() }: DataGridProps) {
+export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = () => true, editedCellKeys = new Set(), onDeleteRow }: DataGridProps) {
   const [editing, setEditing] = useState<{ rowIndex: number; columnIndex: number; value: string } | null>(null);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const selectedCellRef = useRef<HTMLTableCellElement | null>(null);
+
+  useEffect(() => {
+    setSelectedRowIndex(null);
+    setContextMenu(null);
+  }, [table]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("blur", close);
+    return () => { window.removeEventListener("mousedown", close); window.removeEventListener("blur", close); };
+  }, [contextMenu]);
 
   function selectCell(cell: HTMLTableCellElement) {
     if (selectedCellRef.current === cell) return;
@@ -44,7 +60,7 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = 
         <table className="data-grid">
           <thead><tr><th className="row-number">#</th>{table.columns.map((column, index) => <th key={`${column.label}-${index}`} title={`${column.remarks ? `${column.remarks} · ` : ""}${column.typeName}${column.nullable ? " · 可空" : " · 非空"}`}>{hasRemarks && <small className="column-remark">{column.remarks?.trim() || "—"}</small>}<span>{column.label}</span><small>{column.typeName}</small></th>)}</tr></thead>
           <tbody>
-            {table.rows.map((row, rowIndex) => <tr key={rowIndex}><td className="row-number">{rowOffset + rowIndex + 1}</td>{row.map((value, columnIndex) => {
+            {table.rows.map((row, rowIndex) => <tr key={rowIndex} className={selectedRowIndex === rowIndex ? "selected-row" : ""} onClick={() => { setSelectedRowIndex(rowIndex); setContextMenu(null); }} onContextMenu={event => { event.preventDefault(); setSelectedRowIndex(rowIndex); setContextMenu({ x: event.clientX, y: event.clientY, rowIndex }); }}><td className="row-number">{rowOffset + rowIndex + 1}</td>{row.map((value, columnIndex) => {
               const isEditing = editing?.rowIndex === rowIndex && editing.columnIndex === columnIndex;
               const cellKey = `${rowIndex}:${columnIndex}`;
               const editable = Boolean(onEditCell) && isColumnEditable(table.columns[columnIndex]);
@@ -60,10 +76,13 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = 
         </table>
         {table.rows.length === 0 && <div className="empty-grid"><Rows3 size={24} /><span>查询成功，没有返回数据行</span></div>}
       </div>
+      {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={event => event.stopPropagation()}>
+        <button disabled={!onDeleteRow} onClick={() => { onDeleteRow?.(contextMenu.rowIndex); setContextMenu(null); }}><Trash2 size={13} />{onDeleteRow ? "删除此行" : "无主键，无法删除"}</button>
+      </div>}
       <div className={`grid-status${table.truncated ? " warning" : ""}`}>
         {table.truncated ? <AlertTriangle size={13} /> : <Rows3 size={13} />}
         <span>{table.rows.length} 行{table.truncated ? " · 已达到结果上限，数据已截断" : ""}</span>
-        {onEditCell && <small>双击编辑 · ⌘S / Ctrl+S 保存</small>}
+        {onEditCell && <small>双击编辑 · 右键删除 · ⌘S / Ctrl+S 保存</small>}
       </div>
     </div>
   );

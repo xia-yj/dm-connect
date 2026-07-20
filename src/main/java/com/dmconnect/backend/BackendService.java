@@ -99,6 +99,7 @@ public final class BackendService implements AutoCloseable {
             case "object.preview" -> loadPreview(safeParams);
             case "object.updateCell" -> updateObjectCell(safeParams);
             case "object.updateCells" -> updateObjectCells(safeParams);
+            case "object.deleteRow" -> deleteObjectRow(safeParams);
             case "query.open" -> openQuery(requiredText(safeParams, "profileId"));
             case "query.status" -> queryStatus(requiredQuery(safeParams));
             case "query.execute" -> executeQuery(safeParams);
@@ -739,6 +740,42 @@ public final class BackendService implements AutoCloseable {
         }
     }
 
+    private Object deleteObjectRow(JsonNode params) throws Exception {
+        BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
+        DatabaseObject object = new DatabaseObject(requiredText(params, "schema"), requiredText(params, "name"),
+                DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
+        JsonNode keyValues = params.path("keyValues");
+        JsonNode rowValues = params.path("rowValues");
+        if (!keyValues.isObject() && rowValues.isObject()) keyValues = rowValues;
+        if (!keyValues.isObject()) throw new RpcException("INVALID_REQUEST", "缺少用于定位记录的主键值");
+        if (object.kind() != DatabaseObjectKind.TABLE) throw new RpcException("INVALID_OBJECT", "只有数据表支持删除数据");
+        try (Connection connection = workspace.openConnection()) {
+            boolean autoCommit = connection.getAutoCommit();
+            DatabaseMetaData metadata = connection.getMetaData();
+            List<String> primaryKeys = new ArrayList<>();
+            try (var rs = metadata.getPrimaryKeys(adapter(workspace).metadataCatalog(object.schema()), adapter(workspace).metadataSchema(object.schema()), object.name())) {
+                while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
+            }
+            if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地删除数据");
+            String source = adapter(workspace).quoteIdentifier(object.schema()) + "." + adapter(workspace).quoteIdentifier(object.name());
+            String where = primaryKeys.stream().map(key -> adapter(workspace).quoteIdentifier(key) + " = ?")
+                    .collect(java.util.stream.Collectors.joining(" AND "));
+            try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + source + " WHERE " + where)) {
+                for (int index = 0; index < primaryKeys.size(); index++) {
+                    String key = primaryKeys.get(index);
+                    JsonNode keyValue = keyValues.get(key);
+                    if (keyValue == null) keyValue = keyValues.properties().stream().filter(entry -> entry.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue).findFirst().orElse(null);
+                    if (keyValue == null || keyValue.isNull()) throw new RpcException("INVALID_REQUEST", "缺少主键列“" + key + "”的值");
+                    bindJsonValue(statement, index + 1, keyValue);
+                }
+                int deleted = statement.executeUpdate();
+                if (deleted != 1) throw new RpcException("DELETE_CONFLICT", "未能精确删除一条记录，数据可能已被其他操作修改");
+                if (!autoCommit) connection.commit();
+                return Map.of("deleted", deleted);
+            }
+        }
+    }
+
     private int updateObjectCell(Connection connection, DatabaseAdapter adapter, DatabaseObject object, String requestedColumn,
                                  JsonNode value, JsonNode keyValues) throws Exception {
         if (object.kind() != DatabaseObjectKind.TABLE) {
@@ -1015,7 +1052,8 @@ public final class BackendService implements AutoCloseable {
         } else if (value.isBoolean()) {
             statement.setBoolean(index, value.booleanValue());
         } else if (value.isIntegralNumber()) {
-            statement.setObject(index, value.bigIntegerValue());
+            if (value.canConvertToLong()) statement.setLong(index, value.longValue());
+            else statement.setBigDecimal(index, new BigDecimal(value.bigIntegerValue()));
         } else if (value.isFloatingPointNumber()) {
             statement.setBigDecimal(index, value.decimalValue());
         } else {

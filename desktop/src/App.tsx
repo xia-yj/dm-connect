@@ -293,6 +293,13 @@ export default function App() {
     window.setTimeout(() => setSaveNotice(""), 2400);
   }
 
+  async function deleteObjectRow(profileId: string, object: DatabaseObject, keyValues: Record<string, unknown>) {
+    await rpc("object.deleteRow", { profileId, ...object, keyValues });
+    setStatus("已删除 1 行数据");
+    setSaveNotice("已删除 1 行数据");
+    window.setTimeout(() => setSaveNotice(""), 2400);
+  }
+
   async function exportTableInsert(profileId: string, object: DatabaseObject, scope: "CURRENT_PAGE" | "ALL", page: number, filter: { column: string; operator: "=" | "LIKE"; value: string }[] | null) {
     const path = await window.dmConnect.saveSql();
     if (!path) return;
@@ -537,7 +544,7 @@ export default function App() {
         <div className="workspace-content">
           {tabs.map(tab => <div key={tab.id} className={`workspace-panel${activeTabId === tab.id ? " active" : ""}`}>
             {tab.type === "welcome" && selectedProfile?.connected && isNativeDatabase(selectedProfile.databaseType) ? <NativeWorkspace key={selectedProfile.id} profile={selectedProfile} namespaces={schemasByProfile[selectedProfile.id] ?? []} /> : tab.type === "welcome" && <WelcomePanel data={data} showSqlAction={showSqlEntrypoints} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onShowHistory={() => setHistoryOpen(true)} onOpenHistory={entry => void openHistory(entry)} historyRevision={historyRevision} />}
-            {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onEditTable={supportsTableDesigner(data.profiles.find(item => item.id === tab.profileId)?.databaseType ?? "sqlite") ? columnName => void editTable(tab.profileId, tab.result.object, columnName) : undefined} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
+            {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onDeleteRow={keyValues => deleteObjectRow(tab.profileId, tab.result.object, keyValues)} onEditTable={supportsTableDesigner(data.profiles.find(item => item.id === tab.profileId)?.databaseType ?? "sqlite") ? columnName => void editTable(tab.profileId, tab.result.object, columnName) : undefined} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
             {tab.type === "sql" && activeTabId === tab.id && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={sqlByTabId[tab.id] ?? tab.initialSql} onSqlChange={sql => setSqlByTabId(value => ({ ...value, [tab.id]: sql }))} onHistoryChanged={() => setHistoryRevision(value => value + 1)} />}
           </div>)}
         </div>

@@ -4,6 +4,7 @@ import { supportedTableTypes } from "./TableDesignerModal";
 describe("table designer type routing", () => {
   it("keeps DM-specific types on DM profiles", () => {
     expect(supportedTableTypes("dm").has("BFILE")).toBe(true);
+    expect(supportedTableTypes("dm").has("VARCHAR2")).toBe(true);
     expect(supportedTableTypes("dm").has("MEDIUMINT")).toBe(false);
   });
 

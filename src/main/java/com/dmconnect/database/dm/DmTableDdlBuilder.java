@@ -14,14 +14,14 @@ import java.util.Set;
 /** Builds DM DDL for all built-in, conventional DM column data types. */
 public final class DmTableDdlBuilder {
     private static final Set<String> TYPES = Set.of(
-            "CHAR", "VARCHAR",
+            "CHAR", "VARCHAR", "VARCHAR2",
             "TINYINT", "BYTE", "SMALLINT", "INT", "INTEGER", "BIGINT", "NUMERIC", "DECIMAL", "DEC", "NUMBER",
             "REAL", "FLOAT", "DOUBLE", "DOUBLE PRECISION",
             "BIT", "BINARY", "VARBINARY",
             "DATE", "TIME", "TIMESTAMP", "DATETIME", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE",
             "INTERVAL YEAR", "INTERVAL MONTH", "INTERVAL YEAR TO MONTH", "INTERVAL DAY", "INTERVAL HOUR", "INTERVAL MINUTE", "INTERVAL SECOND", "INTERVAL DAY TO HOUR", "INTERVAL DAY TO MINUTE", "INTERVAL DAY TO SECOND", "INTERVAL HOUR TO MINUTE", "INTERVAL HOUR TO SECOND", "INTERVAL MINUTE TO SECOND",
             "TEXT", "LONG", "LONGVARCHAR", "IMAGE", "LONGVARBINARY", "BLOB", "CLOB", "BFILE");
-    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
+    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "VARCHAR2", "BINARY", "VARBINARY");
     private static final Set<String> PRECISION_TYPES = Set.of("NUMERIC", "DECIMAL", "DEC", "NUMBER");
     private static final Set<String> TIME_SCALE_TYPES = Set.of("TIME", "TIMESTAMP", "TIME WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE");
     private final DatabaseAdapter adapter;

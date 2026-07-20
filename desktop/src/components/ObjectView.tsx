@@ -22,17 +22,28 @@ function previewColumnEditable(column: ColumnInfo | undefined): boolean {
   return !/^(?:BINARY|VARBINARY|LONGVARBINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB|CLOB|NCLOB|BFILE|IMAGE|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|LONGVARCHAR|LONG|JSON|GEOMETRY|POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)$/.test(column.typeName.toUpperCase());
 }
 
+function filterColumnSuggestions(input: string, columns: { name: string }[]): { name: string }[] {
+  const match = input.match(/(^|\s)([^\s]*)$/);
+  const token = match?.[2] ?? "";
+  const normalizedToken = token.toLowerCase();
+  if (!normalizedToken || normalizedToken === "and" || normalizedToken === "or") return [];
+  return columns
+    .filter(column => !normalizedToken || column.name.toLowerCase().startsWith(normalizedToken))
+    .map(column => ({ name: column.name }));
+}
+
 interface ObjectViewProps {
   result: ObjectLoadResult;
   onLoadPreview: (page: number, filter: PreviewFilter) => Promise<PagedResultTable>;
   onSaveChanges: (changes: { column: string; value: string | null; keyValues: Record<string, unknown> }[]) => Promise<void>;
+  onDeleteRow: (keyValues: Record<string, unknown>) => Promise<void>;
   compact?: boolean;
   onEditTable?: (columnName?: string) => void;
   onExportInsert?: (scope: "CURRENT_PAGE" | "ALL", page: number, filter: PreviewFilter) => Promise<void>;
   onExportCsv?: (scope: "CURRENT_PAGE" | "ALL", page: number, filter: PreviewFilter) => Promise<void>;
 }
 
-export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = false, onEditTable, onExportInsert, onExportCsv }: ObjectViewProps) {
+export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, compact = false, onEditTable, onExportInsert, onExportCsv }: ObjectViewProps) {
   const filterColumnListId = useId();
   const table = result.object.kind === "TABLE";
   const [active, setActive] = useState<DetailTab>(table ? "preview" : "ddl");
@@ -41,10 +52,13 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pageInput, setPageInput] = useState(result.preview?.page?.toString() ?? "1");
   const [filterInput, setFilterInput] = useState("");
+  const [filterSuggestionsOpen, setFilterSuggestionsOpen] = useState(false);
+  const [activeFilterSuggestion, setActiveFilterSuggestion] = useState(0);
   const [previewFilter, setPreviewFilter] = useState<PreviewFilter>(null);
   const [pendingEdits, setPendingEdits] = useState<Record<string, { rowIndex: number; columnIndex: number; column: string; value: string | null; originalValue: unknown; keyValues: Record<string, unknown> }>>({});
   const [saveError, setSaveError] = useState("");
   const [savingChanges, setSavingChanges] = useState(false);
+  const [deletingRow, setDeletingRow] = useState(false);
   const [selectedColumnName, setSelectedColumnName] = useState("");
   const [insertScope, setInsertScope] = useState<"CURRENT_PAGE" | "ALL">("CURRENT_PAGE");
   const [exportingInsert, setExportingInsert] = useState(false);
@@ -53,6 +67,8 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
     setPreviewError(result.previewError);
     setPageInput(result.preview?.page?.toString() ?? "1");
     setFilterInput("");
+    setFilterSuggestionsOpen(false);
+    setActiveFilterSuggestion(0);
     setPreviewFilter(null);
     setPendingEdits({});
     setSaveError("");
@@ -105,7 +121,7 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
     }
   }
 
-  const primaryKeyColumns = result.details?.constraints.find(item => item.type === "PRIMARY KEY")?.columns ?? [];
+  const primaryKeyColumns = result.details?.constraints.find(item => item.type.trim().toUpperCase() === "PRIMARY KEY")?.columns ?? [];
   function updateCell(rowIndex: number, columnIndex: number, column: string, value: string | null) {
     if (!preview || primaryKeyColumns.length === 0) throw new Error("该表没有主键，无法安全地直接编辑数据");
     const row = preview.rows[rowIndex];
@@ -128,6 +144,31 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
   }
 
   const pendingList = Object.values(pendingEdits);
+  async function deleteRow(rowIndex: number) {
+    if (!preview || deletingRow || pendingList.length > 0) return;
+    if (primaryKeyColumns.length === 0) return;
+    const row = preview.rows[rowIndex];
+    const keyValues = Object.fromEntries(primaryKeyColumns.map(key => {
+      const keyIndex = preview.columns.findIndex(item => item.name === key || item.label === key);
+      if (keyIndex < 0 || row[keyIndex] == null) throw new Error(`当前预览未包含主键列：${key}`);
+      return [key, row[keyIndex]];
+    }));
+    if (!window.confirm("确认删除选中的数据行？此操作不可撤销。")) return;
+    setDeletingRow(true);
+    setSaveError("");
+    try {
+      await onDeleteRow(keyValues);
+      const remainingRows = Math.max(0, preview.totalRows - 1);
+      const lastPage = Math.max(1, Math.ceil(remainingRows / preview.pageSize));
+      const next = await onLoadPreview(Math.min(preview.page, lastPage), previewFilter);
+      setPreview(next);
+      setPageInput(next.page.toString());
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : "删除失败");
+    } finally {
+      setDeletingRow(false);
+    }
+  }
   async function saveChanges() {
     if (pendingList.length === 0 || savingChanges) return;
     setSavingChanges(true);
@@ -170,19 +211,35 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, compact = fal
       remarks: result.details?.columns.find(item => item.name.toUpperCase() === column.name.toUpperCase() || item.name.toUpperCase() === column.label.toUpperCase())?.remarks ?? null
     }))
   } : null;
+  const filterSuggestions = filterColumnSuggestions(filterInput, preview?.columns ?? []);
+  function chooseFilterColumn(columnName: string) {
+    const match = filterInput.match(/(^|\s)([^\s]*)$/);
+    const token = match?.[2] ?? "";
+    setFilterInput(`${filterInput.slice(0, filterInput.length - token.length)}${columnName}`);
+    setFilterSuggestionsOpen(false);
+    setActiveFilterSuggestion(0);
+  }
   const previewPanel = preview ? <div className="preview-with-pagination">
     <div className="preview-filter">
       <Search size={15} />
-      <input list={filterColumnListId} value={filterInput} onChange={event => setFilterInput(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void applyFilter(); }} placeholder="筛选：列名 = 1，可用 AND 连接多个条件" aria-label="数据预览筛选条件" />
-      <datalist id={filterColumnListId}>
-        {preview.columns.map(column => <option key={column.name} value={column.name}>{column.typeName}</option>)}
-      </datalist>
+      <div className="preview-filter-input-wrap">
+        <input id={filterColumnListId} value={filterInput} onChange={event => { setFilterInput(event.target.value); setFilterSuggestionsOpen(true); setActiveFilterSuggestion(0); }} onFocus={() => setFilterSuggestionsOpen(filterInput.trim().length > 0)} onKeyDown={event => {
+          if (event.key === "Escape") { setFilterSuggestionsOpen(false); return; }
+          if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowDown") { event.preventDefault(); setActiveFilterSuggestion(index => Math.min(index + 1, filterSuggestions.length - 1)); return; }
+          if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowUp") { event.preventDefault(); setActiveFilterSuggestion(index => Math.max(index - 1, 0)); return; }
+          if (event.key === "Enter") {
+            if (filterSuggestionsOpen && filterSuggestions.length > 0) { event.preventDefault(); chooseFilterColumn(filterSuggestions[activeFilterSuggestion]?.name ?? filterSuggestions[0].name); return; }
+            setFilterSuggestionsOpen(false); void applyFilter();
+          }
+        }} placeholder="筛选：列名 = 1，可用 AND 连接多个条件" aria-label="数据预览筛选条件" />
+        {filterSuggestionsOpen && filterSuggestions.length > 0 && <div className="preview-filter-suggestions">{filterSuggestions.map((column, index) => <button type="button" key={column.name} className={index === activeFilterSuggestion ? "active" : ""} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActiveFilterSuggestion(index)} onClick={() => chooseFilterColumn(column.name)}>{column.name}</button>)}</div>}
+      </div>
       {previewFilter && <button className="clear-preview-filter" onClick={() => void applyFilter(true)} disabled={previewLoading} title="清除筛选"><X size={15} />清除</button>}
       <button className="apply-preview-filter" onClick={() => void applyFilter()} disabled={previewLoading || !filterInput.trim()}>筛选</button>
       {(onExportInsert || onExportCsv) && <span className="insert-export-actions"><select value={insertScope} onChange={event => setInsertScope(event.target.value as "CURRENT_PAGE" | "ALL")} aria-label="导出范围"><option value="CURRENT_PAGE">当前页</option><option value="ALL">全部数据</option></select>{onExportCsv && <button className="button secondary compact" disabled={exportingInsert} onClick={() => void exportCsv()}><Download size={14} />导出 CSV</button>}{onExportInsert && <button className="button secondary compact" disabled={exportingInsert} onClick={() => void exportInsert()}><Download size={14} />{exportingInsert ? "导出中…" : "导出 INSERT"}</button>}</span>}
     </div>
     {previewError && <div className="preview-error">{previewError}</div>}
-    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} rowOffset={(preview.page - 1) * preview.pageSize} onEditCell={primaryKeyColumns.length > 0 ? (rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value) : undefined} isColumnEditable={column => !primaryKeyColumns.some(key => key.toLowerCase() === column.name.toLowerCase() || key.toLowerCase() === column.label.toLowerCase()) && previewColumnEditable(result.details?.columns.find(item => item.name.toLowerCase() === column.name.toLowerCase() || item.name.toLowerCase() === column.label.toLowerCase()))} editedCellKeys={new Set(Object.keys(pendingEdits))} />
+    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} rowOffset={(preview.page - 1) * preview.pageSize} onEditCell={primaryKeyColumns.length > 0 ? (rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value) : undefined} onDeleteRow={primaryKeyColumns.length > 0 && !deletingRow && pendingList.length === 0 ? rowIndex => void deleteRow(rowIndex) : undefined} isColumnEditable={column => !primaryKeyColumns.some(key => key.toLowerCase() === column.name.toLowerCase() || key.toLowerCase() === column.label.toLowerCase()) && previewColumnEditable(result.details?.columns.find(item => item.name.toLowerCase() === column.name.toLowerCase() || item.name.toLowerCase() === column.label.toLowerCase()))} editedCellKeys={new Set(Object.keys(pendingEdits))} />
     {saveError && <div className="grid-edit-error">{saveError}</div>}
     <div className="preview-pagination">
       <span>共 {preview.totalRows} 条 · 每页 {preview.pageSize} 条</span>

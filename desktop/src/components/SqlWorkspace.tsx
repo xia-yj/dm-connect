@@ -234,7 +234,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
       const result = await rpc<ExecutionResult>("query.execute", executionPayload(mode, allowDangerous));
       onHistoryChanged?.();
       setExecution(result);
-      setActiveOutcome(0);
+      setActiveOutcome(result.success ? 0 : -1);
       setAutoCommitState(result.autoCommit);
       setPendingTransaction(result.pendingTransaction);
       setMessage(result.success

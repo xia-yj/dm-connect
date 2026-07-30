@@ -87,6 +87,21 @@ export interface PagedResultTable extends ResultTable {
   pageSize: number;
 }
 
+export type PreviewFilterCondition = { column: string; operator: "=" | "LIKE"; value: string };
+export type PreviewFilter = PreviewFilterCondition[] | null;
+
+export interface TableSessionStatus {
+  sessionId: string;
+  profileId: string;
+  autoCommit: boolean;
+  pendingTransaction: boolean;
+}
+
+export type PendingTableChange =
+  | { type: "INSERT"; values: Record<string, unknown>; useDefaults: string[]; clientId: string }
+  | { type: "UPDATE"; column: string; value: string | null; keyValues: Record<string, unknown> }
+  | { type: "DELETE"; keyValues: Record<string, unknown> };
+
 export interface ColumnInfo {
   ordinal: number;
   name: string;
@@ -204,5 +219,5 @@ export interface RpcError extends Error {
 
 export type WorkspaceTab =
   | { id: "welcome"; type: "welcome"; title: string }
-  | { id: string; type: "object"; title: string; profileId: string; result: ObjectLoadResult }
+  | { id: string; type: "object"; title: string; profileId: string; result: ObjectLoadResult; tableSession?: TableSessionStatus; hasLocalChanges?: boolean }
   | { id: string; type: "sql"; title: string; profileId: string; profileName: string; databaseType: DatabaseType; sessionId: string; initialSql: string };

@@ -34,7 +34,9 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.Date;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Savepoint;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.sql.Types;
@@ -56,6 +58,7 @@ public final class BackendService implements AutoCloseable {
     private final AppContext context;
     private final ObjectMapper mapper;
     private final Map<String, BackendWorkspace> workspaces = new ConcurrentHashMap<>();
+    private final Map<String, TableSession> tableSessions = new ConcurrentHashMap<>();
     private final Map<String, NativeWorkspace> nativeWorkspaces = new ConcurrentHashMap<>();
     private final Map<String, BackendQuery> queries = new ConcurrentHashMap<>();
     private final SqlScriptParser parser = new SqlScriptParser();
@@ -100,6 +103,14 @@ public final class BackendService implements AutoCloseable {
             case "object.updateCell" -> updateObjectCell(safeParams);
             case "object.updateCells" -> updateObjectCells(safeParams);
             case "object.deleteRow" -> deleteObjectRow(safeParams);
+            case "table.open" -> openTable(safeParams);
+            case "table.status" -> tableStatus(requiredTableSession(safeParams));
+            case "table.preview" -> tablePreview(safeParams);
+            case "table.saveChanges" -> saveTableChanges(safeParams);
+            case "table.autoCommit" -> setTableAutoCommit(requiredTableSession(safeParams), safeParams.path("autoCommit").asBoolean(true));
+            case "table.commit" -> tableTransaction(requiredTableSession(safeParams), true);
+            case "table.rollback" -> tableTransaction(requiredTableSession(safeParams), false);
+            case "table.close" -> closeTable(safeParams);
             case "query.open" -> openQuery(requiredText(safeParams, "profileId"));
             case "query.status" -> queryStatus(requiredQuery(safeParams));
             case "query.execute" -> executeQuery(safeParams);
@@ -309,6 +320,7 @@ public final class BackendService implements AutoCloseable {
     }
 
     private Object disconnect(String profileId) {
+        closeTableSessions(profileId);
         closeQueries(profileId);
         BackendWorkspace workspace = workspaces.remove(profileId);
         if (workspace != null) workspace.close();
@@ -680,6 +692,112 @@ public final class BackendService implements AutoCloseable {
         }
     }
 
+    private Object openTable(JsonNode params) throws Exception {
+        String profileId = requiredText(params, "profileId");
+        BackendWorkspace workspace = requiredWorkspace(profileId);
+        DatabaseObject object = tableObject(params);
+        TableSession session = new TableSession(profileId, workspace, object);
+        tableSessions.put(session.id(), session);
+        return tableStatus(session);
+    }
+
+    private Object tableStatus(TableSession session) throws Exception {
+        return Map.of("sessionId", session.id(), "profileId", session.profileId(),
+                "autoCommit", session.isAutoCommit(), "pendingTransaction", session.hasPendingTransaction());
+    }
+
+    private Object tablePreview(JsonNode params) throws Exception {
+        TableSession session = requiredTableSession(params);
+        int pageSize = Math.max(1, Math.min(500, params.path("pageSize").asInt(100)));
+        int page = Math.max(1, Math.min(1_000_000, params.path("page").asInt(1)));
+        PreviewFilter filter = previewFilter(params);
+        synchronized (session.lock()) {
+            TablePreview preview = adapter(workspaces.get(session.profileId())).metadataProvider()
+                    .previewTable(session.connection(), session.object(), (page - 1) * pageSize, pageSize, filter);
+            long lastPage = Math.max(1, (preview.totalRows() + pageSize - 1) / pageSize);
+            int safePage = (int) Math.min(page, lastPage);
+            if (safePage != page) preview = adapter(workspaces.get(session.profileId())).metadataProvider()
+                    .previewTable(session.connection(), session.object(), (safePage - 1) * pageSize, pageSize, filter);
+            return previewView(preview, safePage, pageSize);
+        }
+    }
+
+    private Object saveTableChanges(JsonNode params) throws Exception {
+        TableSession session = requiredTableSession(params);
+        JsonNode changes = params.path("changes");
+        if (!changes.isArray() || changes.isEmpty()) throw new RpcException("INVALID_REQUEST", "没有要保存的修改");
+        BackendWorkspace workspace = requiredWorkspace(session.profileId());
+        DatabaseAdapter databaseAdapter = adapter(workspace);
+        Savepoint savepoint = null;
+        synchronized (session.lock()) {
+            boolean originallyAutoCommit = session.isAutoCommit();
+            try {
+                if (originallyAutoCommit) session.connection().setAutoCommit(false);
+                else savepoint = session.savepoint("DM_CONNECT_TABLE_SAVE");
+                int affected = 0;
+                for (JsonNode change : changes) {
+                    String type = change.path("type").asText("").toUpperCase(java.util.Locale.ROOT);
+                    affected += switch (type) {
+                        case "INSERT" -> insertObjectRow(session.connection(), databaseAdapter, session.object(), change);
+                        case "UPDATE" -> updateObjectCell(session.connection(), databaseAdapter, session.object(),
+                                requiredText(change, "column"), change.get("value"), change.path("keyValues"));
+                        case "DELETE" -> deleteObjectRow(session.connection(), databaseAdapter, session.object(), change.path("keyValues"));
+                        default -> throw new RpcException("INVALID_ARGUMENT", "未知的数据变更类型：" + type);
+                    };
+                }
+                if (originallyAutoCommit) {
+                    session.connection().commit();
+                    session.connection().setAutoCommit(true);
+                } else {
+                    session.markPendingIfNeeded();
+                    if (savepoint != null) session.releaseSavepoint(savepoint);
+                }
+                return Map.of("affected", affected, "status", tableStatus(session));
+            } catch (Exception exception) {
+                if (originallyAutoCommit) {
+                    try { session.connection().rollback(); session.connection().setAutoCommit(true); } catch (SQLException ignored) { }
+                } else if (savepoint != null) try { session.rollback(savepoint); } catch (SQLException ignored) { }
+                throw exception;
+            }
+        }
+    }
+
+    private Object setTableAutoCommit(TableSession session, boolean autoCommit) throws Exception {
+        synchronized (session.lock()) {
+            session.setAutoCommit(autoCommit);
+            return tableStatus(session);
+        }
+    }
+
+    private Object tableTransaction(TableSession session, boolean commit) throws Exception {
+        synchronized (session.lock()) {
+            if (commit) session.commit(); else session.rollback();
+            return tableStatus(session);
+        }
+    }
+
+    private Object closeTable(JsonNode params) throws Exception {
+        String sessionId = requiredText(params, "sessionId");
+        TableSession session = tableSessions.get(sessionId);
+        if (session == null) throw new RpcException("SESSION_NOT_FOUND", "表格会话已经关闭");
+        String action = params.path("transactionAction").asText("").toUpperCase(java.util.Locale.ROOT);
+        if (session.hasPendingTransaction()) {
+            if ("COMMIT".equals(action)) session.commit();
+            else if ("ROLLBACK".equals(action)) session.rollback();
+            else throw new RpcException("PENDING_TRANSACTION", "此表格标签存在未提交事务");
+        }
+        tableSessions.remove(sessionId, session);
+        session.close();
+        return Map.of("closed", true);
+    }
+
+    private TableSession requiredTableSession(JsonNode params) {
+        String sessionId = requiredText(params, "sessionId");
+        TableSession session = tableSessions.get(sessionId);
+        if (session == null) throw new RpcException("SESSION_NOT_FOUND", "表格会话已经关闭");
+        return session;
+    }
+
     private static PreviewFilter previewFilter(JsonNode params) {
         JsonNode filters = params.path("filters");
         if (filters.isArray() && !filters.isEmpty()) {
@@ -750,30 +868,88 @@ public final class BackendService implements AutoCloseable {
         if (!keyValues.isObject()) throw new RpcException("INVALID_REQUEST", "缺少用于定位记录的主键值");
         if (object.kind() != DatabaseObjectKind.TABLE) throw new RpcException("INVALID_OBJECT", "只有数据表支持删除数据");
         try (Connection connection = workspace.openConnection()) {
-            boolean autoCommit = connection.getAutoCommit();
-            DatabaseMetaData metadata = connection.getMetaData();
-            List<String> primaryKeys = new ArrayList<>();
-            try (var rs = metadata.getPrimaryKeys(adapter(workspace).metadataCatalog(object.schema()), adapter(workspace).metadataSchema(object.schema()), object.name())) {
-                while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
+            return Map.of("deleted", deleteObjectRow(connection, adapter(workspace), object, keyValues));
+        }
+    }
+
+    private int deleteObjectRow(Connection connection, DatabaseAdapter databaseAdapter, DatabaseObject object, JsonNode keyValues) throws Exception {
+        DatabaseMetaData metadata = connection.getMetaData();
+        List<String> primaryKeys = new ArrayList<>();
+        try (var rs = metadata.getPrimaryKeys(databaseAdapter.metadataCatalog(object.schema()), databaseAdapter.metadataSchema(object.schema()), object.name())) {
+            while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
+        }
+        if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地删除数据");
+        String source = qualifiedTableName(databaseAdapter, object);
+        String where = primaryKeys.stream().map(key -> databaseAdapter.quoteIdentifier(key) + " = ?")
+                .collect(java.util.stream.Collectors.joining(" AND "));
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + source + " WHERE " + where)) {
+            for (int index = 0; index < primaryKeys.size(); index++) {
+                String key = primaryKeys.get(index);
+                JsonNode keyValue = keyValues.get(key);
+                if (keyValue == null) keyValue = keyValues.properties().stream().filter(entry -> entry.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue).findFirst().orElse(null);
+                if (keyValue == null || keyValue.isNull()) throw new RpcException("INVALID_REQUEST", "缺少主键列“" + key + "”的值");
+                bindJsonValue(statement, index + 1, keyValue);
             }
-            if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地删除数据");
-            String source = adapter(workspace).quoteIdentifier(object.schema()) + "." + adapter(workspace).quoteIdentifier(object.name());
-            String where = primaryKeys.stream().map(key -> adapter(workspace).quoteIdentifier(key) + " = ?")
-                    .collect(java.util.stream.Collectors.joining(" AND "));
-            try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + source + " WHERE " + where)) {
-                for (int index = 0; index < primaryKeys.size(); index++) {
-                    String key = primaryKeys.get(index);
-                    JsonNode keyValue = keyValues.get(key);
-                    if (keyValue == null) keyValue = keyValues.properties().stream().filter(entry -> entry.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue).findFirst().orElse(null);
-                    if (keyValue == null || keyValue.isNull()) throw new RpcException("INVALID_REQUEST", "缺少主键列“" + key + "”的值");
-                    bindJsonValue(statement, index + 1, keyValue);
+            int deleted = statement.executeUpdate();
+            if (deleted != 1) throw new RpcException("DELETE_CONFLICT", "未能精确删除一条记录，数据可能已被其他操作修改");
+            return deleted;
+        }
+    }
+
+    private int insertObjectRow(Connection connection, DatabaseAdapter databaseAdapter, DatabaseObject object, JsonNode change) throws Exception {
+        JsonNode values = change.path("values");
+        if (!values.isObject()) throw new RpcException("INVALID_REQUEST", "新增行数据无效");
+        DatabaseMetaData metadata = connection.getMetaData();
+        Map<String, String> actualNames = new LinkedHashMap<>();
+        Map<String, Boolean> generated = new LinkedHashMap<>();
+        Map<String, Boolean> nullable = new LinkedHashMap<>();
+        Map<String, String> defaults = new LinkedHashMap<>();
+        try (var rs = metadata.getColumns(databaseAdapter.metadataCatalog(object.schema()), databaseAdapter.metadataSchema(object.schema()), object.name(), "%")) {
+            while (rs.next()) {
+                String name = rs.getString("COLUMN_NAME");
+                if (name != null) {
+                    String key = name.toUpperCase(java.util.Locale.ROOT);
+                    actualNames.put(key, name);
+                    generated.put(key, "YES".equalsIgnoreCase(safeResultString(rs, "IS_GENERATEDCOLUMN")) || "YES".equalsIgnoreCase(safeResultString(rs, "IS_AUTOINCREMENT")));
+                    nullable.put(key, rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls);
+                    defaults.put(key, safeResultString(rs, "COLUMN_DEF"));
                 }
-                int deleted = statement.executeUpdate();
-                if (deleted != 1) throw new RpcException("DELETE_CONFLICT", "未能精确删除一条记录，数据可能已被其他操作修改");
-                if (!autoCommit) connection.commit();
-                return Map.of("deleted", deleted);
             }
         }
+        List<String> columns = new ArrayList<>();
+        List<JsonNode> bound = new ArrayList<>();
+        values.fields().forEachRemaining(entry -> {
+            String actualKey = actualNames.keySet().stream().filter(item -> item.equalsIgnoreCase(entry.getKey())).findFirst().orElse(null);
+            String actual = actualKey == null ? null : actualNames.get(actualKey);
+            if (actual == null) throw new RpcException("INVALID_COLUMN", "找不到要插入的列：" + entry.getKey());
+            if (generated.getOrDefault(actualKey, false)) throw new RpcException("READ_ONLY_COLUMN", "自增列或生成列不能手工插入：" + entry.getKey());
+            columns.add(actual);
+            bound.add(entry.getValue());
+        });
+        for (String key : actualNames.keySet()) {
+            if (generated.getOrDefault(key, false)) continue;
+            if (!values.has(actualNames.get(key)) && !values.has(key) && !nullable.getOrDefault(key, true) && defaults.getOrDefault(key, "").isBlank()) {
+                throw new RpcException("REQUIRED_COLUMN", "非空列必须填写：" + actualNames.get(key));
+            }
+        }
+        String source = qualifiedTableName(databaseAdapter, object);
+        String sql = columns.isEmpty()
+                ? "INSERT INTO " + source + " DEFAULT VALUES"
+                : "INSERT INTO " + source + " (" + columns.stream().map(databaseAdapter::quoteIdentifier).collect(java.util.stream.Collectors.joining(", ")) + ") VALUES (" + columns.stream().map(item -> "?").collect(java.util.stream.Collectors.joining(", ")) + ")";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int index = 0; index < bound.size(); index++) bindJsonValue(statement, index + 1, bound.get(index));
+            if (statement.executeUpdate() != 1) throw new RpcException("INSERT_CONFLICT", "未能插入一条记录");
+            return 1;
+        }
+    }
+
+    private static String safeResultString(java.sql.ResultSet rows, String column) {
+        try { return rows.getString(column); } catch (SQLException ignored) { return ""; }
+    }
+
+    private static String qualifiedTableName(DatabaseAdapter databaseAdapter, DatabaseObject object) {
+        if (object.schema() == null || object.schema().isBlank()) return databaseAdapter.quoteIdentifier(object.name());
+        return databaseAdapter.quoteIdentifier(object.schema()) + "." + databaseAdapter.quoteIdentifier(object.name());
     }
 
     private int updateObjectCell(Connection connection, DatabaseAdapter adapter, DatabaseObject object, String requestedColumn,
@@ -1154,7 +1330,18 @@ public final class BackendService implements AutoCloseable {
         });
     }
 
+    private void closeTableSessions(String profileId) {
+        List<TableSession> matches = tableSessions.values().stream()
+                .filter(session -> session.profileId().equals(profileId)).toList();
+        matches.forEach(session -> {
+            tableSessions.remove(session.id());
+            session.close();
+        });
+    }
+
     private void disconnectAll() {
+        tableSessions.values().forEach(TableSession::close);
+        tableSessions.clear();
         queries.values().forEach(BackendQuery::close);
         queries.clear();
         workspaces.values().forEach(BackendWorkspace::close);

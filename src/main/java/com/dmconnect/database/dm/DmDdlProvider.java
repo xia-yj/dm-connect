@@ -11,9 +11,12 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 final class DmDdlProvider implements DdlProvider {
     private static final String SQL = "SELECT DBMS_METADATA.GET_DDL(?, ?, ?)";
+    private static final Pattern LONG_ROW = Pattern.compile("\\bUSING\\s+LONG\\s+ROW\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENABLE_LONG_ROW = Pattern.compile("\\bENABLE\\s+USING\\s+LONG\\s+ROW\\b", Pattern.CASE_INSENSITIVE);
 
     @Override
     public String getDdl(Connection connection, DatabaseObject object) throws SQLException {
@@ -38,9 +41,23 @@ final class DmDdlProvider implements DdlProvider {
                 } else {
                     ddl = value == null ? "" : value.toString();
                 }
-                return appendTableComments(connection, object, ddl);
+                String withComments = appendTableComments(connection, object, ddl);
+                return appendLongRowSql(object, withComments, hasLongRow(ddl));
             }
         }
+    }
+
+    static boolean hasLongRow(String ddl) {
+        return ddl != null && LONG_ROW.matcher(ddl).find();
+    }
+
+    static String appendLongRowSql(DatabaseObject object, String ddl, boolean longRowEnabled) {
+        if (object.kind() != com.dmconnect.model.DatabaseObjectKind.TABLE
+                || !longRowEnabled || ENABLE_LONG_ROW.matcher(ddl).find()) return ddl;
+        String base = ddl.stripTrailing();
+        String separator = base.endsWith(";") ? "\n\n" : ";\n\n";
+        return base + separator + "ALTER TABLE " + qualified(object.schema(), object.name())
+                + " ENABLE USING LONG ROW;";
     }
 
     private static String appendTableComments(Connection connection, DatabaseObject object, String ddl)

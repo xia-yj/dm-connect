@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { DataGrid, displayValue } from "./DataGrid";
 
 describe("DataGrid", () => {
@@ -20,5 +20,25 @@ describe("DataGrid", () => {
 
   it("可以安全显示对象类型的单元格值", () => {
     expect(displayValue({ summary: "BLOB (128 bytes)" })).toBe('{"summary":"BLOB (128 bytes)"}');
+  });
+
+  it("右键菜单不会被右键或菜单内部点击提前关闭", () => {
+    const onDeleteRow = vi.fn();
+    const { container } = render(<DataGrid table={{
+      columns: [{ name: "ID", label: "ID", typeName: "INT", jdbcType: 4, nullable: false }],
+      rows: [[1]],
+      truncated: false
+    }} onDeleteRow={onDeleteRow} />);
+
+    fireEvent.contextMenu(container.querySelector("tbody tr")!, { clientX: 40, clientY: 40 });
+    const deleteButton = screen.getByRole("button", { name: "删除此行" });
+    expect(deleteButton).toBeVisible();
+
+    fireEvent.mouseDown(window, { button: 2 });
+    expect(deleteButton).toBeVisible();
+    fireEvent.mouseDown(deleteButton, { button: 0 });
+    expect(deleteButton).toBeVisible();
+    fireEvent.click(deleteButton);
+    expect(onDeleteRow).toHaveBeenCalledWith(0);
   });
 });

@@ -16,9 +16,9 @@ import { WelcomePanel } from "./components/WelcomePanel";
 import { NativeWorkspace } from "./components/NativeWorkspace";
 import type {
   BootstrapData, ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType,
-  AppUpdateInfo, HistoryEntry, ObjectLoadResult, QueryOpenResult, QueryStatus, TableDefinitionDraft, TableDetails, WorkspaceTab
+  AppUpdateInfo, HistoryEntry, ObjectLoadResult, QueryOpenResult, QueryStatus, TableDefinitionDraft, TableDetails, WorkspaceTab,
+  PendingTableChange, PreviewFilter, PagedResultTable, TableSessionStatus
 } from "./types";
-import type { PagedResultTable } from "./types";
 
 interface PasswordPrompt {
   profile: ConnectionProfile;
@@ -28,7 +28,7 @@ interface PasswordPrompt {
 }
 
 interface PendingClose {
-  tab: Extract<WorkspaceTab, { type: "sql" }>;
+  tab: Extract<WorkspaceTab, { type: "sql" | "object" }>;
 }
 
 interface TableDesignerState {
@@ -273,7 +273,15 @@ export default function App() {
     setStatus(`正在加载 ${object.schema}.${object.name}…`);
     try {
       const result = await rpc<ObjectLoadResult>("object.load", { profileId, ...object });
-      const tab: WorkspaceTab = { id, type: "object", title: object.name, profileId, result };
+      let tableSession: TableSessionStatus | undefined;
+      if (object.kind === "TABLE") {
+        try {
+          tableSession = await rpc<TableSessionStatus>("table.open", { profileId, ...object });
+        } catch (cause) {
+          setStatus(`表格会话创建失败，当前以只读方式打开：${errorMessage(cause)}`);
+        }
+      }
+      const tab: WorkspaceTab = { id, type: "object", title: object.name, profileId, result, tableSession };
       setTabs(value => [...value, tab]);
       setActiveTabId(id);
       setStatus(`${object.kind === "TABLE" ? "表数据预览" : "对象详情"}已加载`);
@@ -282,15 +290,48 @@ export default function App() {
     }
   }
 
-  async function loadObjectPreview(profileId: string, object: DatabaseObject, page: number, filter: { column: string; operator: "=" | "LIKE"; value: string }[] | null): Promise<PagedResultTable> {
-    return rpc<PagedResultTable>("object.preview", { profileId, ...object, page, pageSize: 100, ...(filter ? { filters: filter } : {}) });
+  async function loadObjectPreview(profileId: string, object: DatabaseObject, page: number, filter: PreviewFilter, tableSession?: TableSessionStatus): Promise<PagedResultTable> {
+    const method = tableSession ? "table.preview" : "object.preview";
+    return rpc<PagedResultTable>(method, { ...(tableSession ? { sessionId: tableSession.sessionId } : { profileId, ...object }), page, pageSize: 100, ...(filter ? { filters: filter } : {}) });
   }
 
-  async function saveObjectChanges(profileId: string, object: DatabaseObject, changes: { column: string; value: string | null; keyValues: Record<string, unknown> }[]) {
-    await rpc("object.updateCells", { profileId, ...object, changes });
-    setStatus(`已保存 ${changes.length} 项修改`);
-    setSaveNotice(`已保存 ${changes.length} 项修改`);
-    window.setTimeout(() => setSaveNotice(""), 2400);
+  async function saveObjectChanges(profileId: string, object: DatabaseObject, changes: PendingTableChange[], tableSession?: TableSessionStatus): Promise<TableSessionStatus | undefined> {
+    if (tableSession) {
+      const result = await rpc<{ affected: number; status: TableSessionStatus }>("table.saveChanges", { sessionId: tableSession.sessionId, changes });
+      setStatus(`已保存 ${result.affected} 项修改`);
+      setSaveNotice(`已保存 ${result.affected} 项修改`);
+      window.setTimeout(() => setSaveNotice(""), 2400);
+      return result.status;
+    }
+    const updates = changes.filter((change): change is Extract<PendingTableChange, { type: "UPDATE" }> => change.type === "UPDATE");
+    for (const change of changes) {
+      if (change.type === "DELETE") await deleteObjectRow(profileId, object, change.keyValues);
+      else if (change.type === "UPDATE") await rpc("object.updateCell", { profileId, ...object, column: change.column, value: change.value, keyValues: change.keyValues });
+    }
+    if (updates.length > 0) {
+      setStatus(`已保存 ${updates.length} 项修改`);
+      setSaveNotice(`已保存 ${updates.length} 项修改`);
+      window.setTimeout(() => setSaveNotice(""), 2400);
+    }
+    return undefined;
+  }
+
+  function updateTableSession(tabId: string, status: TableSessionStatus) {
+    setTabs(value => value.map(tab => tab.id === tabId && tab.type === "object" ? { ...tab, tableSession: status } : tab));
+  }
+
+  function updateTableDirty(tabId: string, hasLocalChanges: boolean) {
+    setTabs(value => {
+      const current = value.find(tab => tab.id === tabId);
+      if (!current || current.type !== "object" || current.hasLocalChanges === hasLocalChanges) return value;
+      return value.map(tab => tab.id === tabId && tab.type === "object" ? { ...tab, hasLocalChanges } : tab);
+    });
+  }
+
+  async function tableSessionAction(tab: Extract<WorkspaceTab, { type: "object" }>, action: "commit" | "rollback" | "autoCommit", value?: boolean): Promise<TableSessionStatus | undefined> {
+    if (!tab.tableSession) return undefined;
+    const method = action === "commit" ? "table.commit" : action === "rollback" ? "table.rollback" : "table.autoCommit";
+    return rpc<TableSessionStatus>(method, { sessionId: tab.tableSession.sessionId, ...(action === "autoCommit" ? { autoCommit: value } : {}) });
   }
 
   async function deleteObjectRow(profileId: string, object: DatabaseObject, keyValues: Record<string, unknown>) {
@@ -335,6 +376,8 @@ export default function App() {
 
   async function closeTab(tab: WorkspaceTab) {
     if (tab.type === "welcome") return;
+    if (tab.type === "object" && tab.hasLocalChanges
+      && !window.confirm("当前表格有未保存的新增、修改或删除草稿。确认放弃这些草稿并关闭标签吗？")) return;
     if (tab.type === "sql") {
       try {
         const query = await rpc<QueryStatus>("query.status", { sessionId: tab.sessionId });
@@ -343,6 +386,11 @@ export default function App() {
       } catch (cause) {
         if (asRpcError(cause).code !== "SESSION_NOT_FOUND") setStatus(errorMessage(cause));
       }
+    }
+    if (tab.type === "object" && tab.tableSession) {
+      if (tab.tableSession.pendingTransaction) { setPendingClose({ tab }); return; }
+      try { await rpc("table.close", { sessionId: tab.tableSession.sessionId }); }
+      catch (cause) { if (asRpcError(cause).code !== "SESSION_NOT_FOUND") setStatus(errorMessage(cause)); }
     }
     removeTab(tab.id);
   }
@@ -394,7 +442,8 @@ export default function App() {
     const { tab } = pendingClose;
     setPendingClose(null);
     try {
-      await rpc("query.close", { sessionId: tab.sessionId, transactionAction: action });
+      if (tab.type === "sql") await rpc("query.close", { sessionId: tab.sessionId, transactionAction: action });
+      else if (tab.tableSession) await rpc("table.close", { sessionId: tab.tableSession.sessionId, transactionAction: action });
       removeTab(tab.id);
     } catch (cause) {
       setStatus(`关闭 SQL 标签失败：${errorMessage(cause)}`);
@@ -544,7 +593,7 @@ export default function App() {
         <div className="workspace-content">
           {tabs.map(tab => <div key={tab.id} className={`workspace-panel${activeTabId === tab.id ? " active" : ""}`}>
             {tab.type === "welcome" && selectedProfile?.connected && isNativeDatabase(selectedProfile.databaseType) ? <NativeWorkspace key={selectedProfile.id} profile={selectedProfile} namespaces={schemasByProfile[selectedProfile.id] ?? []} /> : tab.type === "welcome" && <WelcomePanel data={data} showSqlAction={showSqlEntrypoints} onNewConnection={() => setConnectionModal("new")} onNewSql={() => newSql()} onImportDriver={() => setConnectionModal("new")} onShowHistory={() => setHistoryOpen(true)} onOpenHistory={entry => void openHistory(entry)} historyRevision={historyRevision} />}
-            {tab.type === "object" && <ObjectView result={tab.result} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes)} onDeleteRow={keyValues => deleteObjectRow(tab.profileId, tab.result.object, keyValues)} onEditTable={supportsTableDesigner(data.profiles.find(item => item.id === tab.profileId)?.databaseType ?? "sqlite") ? columnName => void editTable(tab.profileId, tab.result.object, columnName) : undefined} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
+            {tab.type === "object" && <ObjectView result={tab.result} tableSession={tab.tableSession} onDirtyChange={dirty => updateTableDirty(tab.id, dirty)} onTableSessionStatus={statusValue => updateTableSession(tab.id, statusValue)} onLoadPreview={(page, filter) => loadObjectPreview(tab.profileId, tab.result.object, page, filter, tab.tableSession)} onSaveChanges={changes => saveObjectChanges(tab.profileId, tab.result.object, changes, tab.tableSession)} onCommitTable={async () => { const next = await tableSessionAction(tab, "commit"); if (next) updateTableSession(tab.id, next); return next; }} onRollbackTable={async () => { const next = await tableSessionAction(tab, "rollback"); if (next) updateTableSession(tab.id, next); return next; }} onAutoCommitTable={async autoCommit => { const next = await tableSessionAction(tab, "autoCommit", autoCommit); if (next) updateTableSession(tab.id, next); return next; }} onDeleteRow={keyValues => deleteObjectRow(tab.profileId, tab.result.object, keyValues)} onEditTable={supportsTableDesigner(data.profiles.find(item => item.id === tab.profileId)?.databaseType ?? "sqlite") ? columnName => void editTable(tab.profileId, tab.result.object, columnName) : undefined} onExportInsert={(scope, page, filter) => exportTableInsert(tab.profileId, tab.result.object, scope, page, filter)} onExportCsv={(scope, page, filter) => exportTableCsv(tab.profileId, tab.result.object, scope, page, filter)} />}
             {tab.type === "sql" && activeTabId === tab.id && <SqlWorkspace sessionId={tab.sessionId} profileName={tab.profileName} profileId={tab.profileId} databaseType={tab.databaseType} schemas={schemasByProfile[tab.profileId] ?? []} tableSuggestions={Object.entries(objectsByKey).filter(([key]) => key.startsWith(`${tab.profileId}:`) && key.endsWith(":TABLE")).flatMap(([, objects]) => objects)} initialSql={sqlByTabId[tab.id] ?? tab.initialSql} onSqlChange={sql => setSqlByTabId(value => ({ ...value, [tab.id]: sql }))} onHistoryChanged={() => setHistoryRevision(value => value + 1)} />}
           </div>)}
         </div>

@@ -19,6 +19,7 @@ const allowedMethods = new Set([
   "app.bootstrap", "app.ping", "storage.reset",
   "driver.list", "driver.import", "profile.list", "profile.save", "profile.copy", "profile.delete", "profile.test",
   "connection.connect", "connection.disconnect", "connection.schemas", "objects.list", "object.load", "object.preview", "object.updateCell", "object.updateCells", "object.deleteRow",
+  "table.open", "table.status", "table.preview", "table.saveChanges", "table.autoCommit", "table.commit", "table.rollback", "table.close",
   "mongo.collections", "mongo.documents", "mongo.insert", "mongo.replace", "mongo.delete", "redis.keys", "redis.key", "redis.command",
   "table.create", "table.alter", "table.longRowStatus", "table.setLongRow",
   "query.open", "query.status", "query.execute", "query.cancel", "query.autoCommit", "query.commit", "query.rollback", "query.close",

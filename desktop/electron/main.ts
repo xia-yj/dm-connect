@@ -86,6 +86,35 @@ async function checkForUpdate(manifestUrlText: string): Promise<AvailableUpdate 
   return compareVersion(manifest.version, app.getVersion()) > 0 ? { version: manifest.version, build: manifest.build, url, notes: manifest.notes } : null;
 }
 
+function isHttp2ProtocolError(cause: unknown): boolean {
+  return String(cause).includes("ERR_HTTP2_PROTOCOL_ERROR");
+}
+
+async function writeUpdateArchive(response: Response, archive: string): Promise<void> {
+  if (!response.ok || !response.body) throw new Error(`下载更新包失败（HTTP ${response.status}）`);
+  const total = Number(response.headers.get("content-length") ?? "0");
+  let received = 0;
+  const progress = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+    received += chunk.length;
+    sendUpdateStatus(total > 0 ? `正在下载新版本… ${Math.min(100, Math.floor(received / total * 100))}%` : "正在下载新版本…");
+    callback(null, chunk);
+  } });
+  await pipeline(Readable.fromWeb(response.body as never), progress, createWriteStream(archive));
+}
+
+async function downloadUpdateArchive(url: string, archive: string): Promise<void> {
+  try {
+    await writeUpdateArchive(await net.fetch(url), archive);
+  } catch (cause) {
+    if (!isHttp2ProtocolError(cause)) throw cause;
+    // GitHub 的大文件下载偶发触发 Chromium 网络栈的 HTTP/2 协议错误。
+    // Node fetch 使用独立的 HTTP 客户端，作为兼容回退通道继续下载。
+    sendUpdateStatus("下载连接异常，正在切换兼容下载方式…");
+    await fs.rm(archive, { force: true });
+    await writeUpdateArchive(await globalThis.fetch(url), archive);
+  }
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\\"'\\\"'")}'`;
 }
@@ -102,18 +131,9 @@ async function downloadAndInstallUpdate(manifestUrl: string): Promise<void> {
   if (!update) throw new Error("当前已是最新版本");
   const currentApp = currentApplicationBundlePath();
   sendUpdateStatus("正在下载新版本…");
-  const response = await net.fetch(update.url);
-  if (!response.ok || !response.body) throw new Error(`下载更新包失败（HTTP ${response.status}）`);
   const archive = join(tmpdir(), `dm-connect-update-${crypto.randomUUID()}.zip`);
-  const total = Number(response.headers.get("content-length") ?? "0");
-  let received = 0;
-  const progress = new Transform({ transform(chunk: Buffer, _encoding, callback) {
-    received += chunk.length;
-    sendUpdateStatus(total > 0 ? `正在下载新版本… ${Math.min(100, Math.floor(received / total * 100))}%` : "正在下载新版本…");
-    callback(null, chunk);
-  } });
   try {
-    await pipeline(Readable.fromWeb(response.body as never), progress, createWriteStream(archive));
+    await downloadUpdateArchive(update.url, archive);
     const parent = resolve(currentApp, "..");
     const scriptPath = join(tmpdir(), `install-dm-connect-${crypto.randomUUID()}.sh`);
     const script = `#!/bin/bash

@@ -83,6 +83,7 @@ export default function App() {
   const [updateDialog, setUpdateDialog] = useState<AppUpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState("");
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<number | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem("dm-connect.sidebar-width"));
@@ -467,6 +468,7 @@ export default function App() {
       const update = await window.dmConnect.checkForUpdate(manifestUrl);
       setAvailableUpdate(update);
       if (update) {
+        setUpdateError("");
         setStatus(`发现新版本：${updateDisplayVersion(update)}`);
         setUpdateDialog(update);
       } else if (!silent) {
@@ -482,13 +484,16 @@ export default function App() {
   async function installAvailableUpdate() {
     if (!updateDialog || installingUpdate) return;
     setInstallingUpdate(true);
+    setUpdateError("");
     setUpdateDownloadProgress(0);
     try {
       await window.dmConnect.installUpdate(updateManifestUrl.trim());
     } catch (cause) {
       setInstallingUpdate(false);
       setUpdateDownloadProgress(null);
-      setStatus(`更新失败：${errorMessage(cause)}`);
+      const message = `更新失败：${errorMessage(cause)}`;
+      setUpdateError(message);
+      setStatus(message);
     }
   }
 
@@ -626,7 +631,7 @@ export default function App() {
       {settingsOpen && <Modal title="数据库连接工具设置" description={`桌面客户端 ${data.version}`} onClose={() => setSettingsOpen(false)} footer={<button className="button primary" onClick={() => setSettingsOpen(false)}>完成</button>}>
         <div className="settings-list"><section><span><FileUp size={18} /></span><div><strong>JDBC 驱动</strong><small>MySQL、PostgreSQL、SQL Server、SQLite 已内置；DM、Oracle 或替代版本可从连接窗口导入</small></div><button className="button secondary compact" onClick={() => { setSettingsOpen(false); setConnectionModal("new"); }}>管理驱动</button></section><section className="update-settings"><span><RefreshCw size={18} /></span><div><strong>应用更新</strong><small>更新清单地址</small><input className="field-input" value={updateManifestUrl} placeholder="http://服务器地址/dm-connect-updates/update.json" onChange={event => setUpdateManifestUrl(event.target.value)} /></div><button className="button secondary compact" disabled={checkingUpdate || installingUpdate} onClick={() => void checkForAppUpdate(false)}>{checkingUpdate ? "检查中" : "检查更新"}</button></section><section><span><LockKeyhole size={18} /></span><div><strong>本地数据</strong><small>密码和 SQL 历史仅保存在本机，应用自动管理加密密钥</small></div><button className="button danger-text compact" onClick={() => setResetConfirm(true)}>清除</button></section></div>
       </Modal>}
-      {updateDialog && <Modal title={`发现新版本 ${updateDisplayVersion(updateDialog)}`} description="下载完成后，应用会自动退出、替换并重启。" onClose={() => !installingUpdate && setUpdateDialog(null)} footer={<><button className="button secondary" disabled={installingUpdate} onClick={() => setUpdateDialog(null)}>稍后</button><button className="button primary" disabled={installingUpdate} onClick={() => void installAvailableUpdate()}>{installingUpdate && <LoaderCircle className="spin" size={15} />}{installingUpdate ? `正在下载${updateDownloadProgress == null ? "" : ` ${updateDownloadProgress}%`}` : "立即更新"}</button></>}><p className="confirm-message">{updateDialog.notes?.trim() || "本次更新已准备好，可以立即安装。"}</p>{installingUpdate && <div className="update-download-progress" aria-label="更新下载进度"><div><span>正在下载更新包</span><strong>{updateDownloadProgress == null ? "准备中" : `${updateDownloadProgress}%`}</strong></div><i><b style={{ width: `${updateDownloadProgress ?? 0}%` }} /></i></div>}</Modal>}
+      {updateDialog && <Modal title={`发现新版本 ${updateDisplayVersion(updateDialog)}`} description="下载完成后，应用会自动退出、替换并重启。" onClose={() => { if (!installingUpdate) { setUpdateError(""); setUpdateDialog(null); } }} footer={<><button className="button secondary" disabled={installingUpdate} onClick={() => { setUpdateError(""); setUpdateDialog(null); }}>稍后</button><button className="button primary" disabled={installingUpdate} onClick={() => void installAvailableUpdate()}>{installingUpdate && <LoaderCircle className="spin" size={15} />}{installingUpdate ? `正在下载${updateDownloadProgress == null ? "" : ` ${updateDownloadProgress}%`}` : "立即更新"}</button></>}><p className="confirm-message">{updateDialog.notes?.trim() || "本次更新已准备好，可以立即安装。"}</p>{updateError && <p className="form-error">{updateError}</p>}{installingUpdate && <div className="update-download-progress" aria-label="更新下载进度"><div><span>正在下载更新包</span><strong>{updateDownloadProgress == null ? "准备中" : `${updateDownloadProgress}%`}</strong></div><i><b style={{ width: `${updateDownloadProgress ?? 0}%` }} /></i></div>}</Modal>}
       {deleteTarget && <ConfirmModal title="删除数据库连接" message={`确认删除“${deleteTarget.name}”吗？保存的密码也会一并删除。`} confirmText="删除连接" danger onCancel={() => setDeleteTarget(null)} onConfirm={() => void deleteProfile()} />}
       {resetConfirm && <ConfirmModal title="清除本地数据" message="这会删除所有已保存的数据库密码和 SQL 历史，但保留连接配置。" confirmText="确认清除" danger onCancel={() => setResetConfirm(false)} onConfirm={() => void resetLocalData()} />}
       {pendingClose && <Modal title="存在未提交事务" description={pendingClose.tab.title} onClose={() => setPendingClose(null)} footer={<><button className="button secondary" onClick={() => setPendingClose(null)}>取消</button><button className="button secondary" onClick={() => closePending("ROLLBACK")}>回滚并关闭</button><button className="button primary" onClick={() => closePending("COMMIT")}>提交并关闭</button></>}><p className="confirm-message">此 SQL 标签存在未提交事务，请先选择提交或回滚。</p></Modal>}

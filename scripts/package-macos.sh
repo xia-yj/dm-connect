@@ -24,7 +24,9 @@ cd "$ROOT_DIR/desktop"
 npm ci
 npm test
 npm run build
-CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dir --"$ELECTRON_ARCH"
+# 发布由 GitHub Actions 的 release job 统一负责。显式关闭 electron-builder
+# 在 tag 构建时的隐式发布，避免它以只读 token 请求 GitHub Release 而失败。
+CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dir --"$ELECTRON_ARCH" --publish never
 
 APP_PATH="$ROOT_DIR/target/electron/mac-$ELECTRON_ARCH/数据库连接工具.app"
 if [[ ! -d "$APP_PATH" ]]; then

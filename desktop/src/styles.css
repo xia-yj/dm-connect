@@ -303,7 +303,45 @@ details summary::-webkit-details-marker { display: none; }
 .toolbar-export { display: inline-flex; align-items: center; gap: 3px; }
 .toolbar-export select { height: 28px; padding: 0 5px; border: 1px solid #d6e0ec; border-radius: 5px; color: #526176; background: #fff; font-size: 10px; }
 .preview-filter-input-wrap { position: relative; width: min(380px, 45vw); min-width: 180px; }
-.preview-filter-input-wrap > input { width: 100%; height: 29px; padding: 4px 9px; border: 1px solid #d6e0ec; border-radius: 6px; outline: none; color: #344259; background: #fff; font: 11px "SFMono-Regular", Menlo, Monaco, Consolas, monospace; }
+.filter-syntax-input { position: relative; width: 100%; height: 29px; border: 1px solid #d6e0ec; border-radius: 6px; background: #fff; overflow: hidden; }
+.filter-syntax-input:focus-within { border-color: #77a5ef; box-shadow: 0 0 0 3px rgba(37,99,235,.09); }
+.filter-syntax-highlight,
+.filter-syntax-input > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 4px 9px;
+  border: 0;
+  outline: none;
+  font: 11px/21px "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  white-space: pre;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.filter-syntax-highlight {
+  z-index: 0;
+  color: #344259;
+  pointer-events: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filter-syntax-highlight::-webkit-scrollbar { display: none; }
+.filter-syntax-input > input {
+  z-index: 1;
+  color: transparent;
+  caret-color: #1f4f96;
+  background: transparent;
+}
+.filter-syntax-input:not(.has-value) > input { color: #9aa8ba; }
+.filter-syntax-input:not(.has-value) .filter-syntax-highlight { visibility: hidden; }
+.filter-token-column { color: #0f5ec5; font-weight: 600; }
+.filter-token-keyword { color: #7a3fd1; font-weight: 700; }
+.filter-token-operator { color: #c2410c; font-weight: 700; }
+.filter-token-string { color: #0f7a45; }
+.filter-token-number { color: #b45309; }
+.filter-token-text { color: #344259; }
 .preview-filter-suggestions { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 3px); max-height: 220px; overflow-y: auto; padding: 4px; border: 1px solid #cfd9e6; border-radius: 7px; background: #fff; box-shadow: 0 8px 22px rgba(29, 48, 75, .18); }
 .preview-filter-suggestions button { width: 100%; min-height: 28px; padding: 5px 8px; border: 0; border-radius: 4px; color: #344259; background: transparent; text-align: left; font: 11px "SFMono-Regular", Menlo, Monaco, Consolas, monospace; }
 .preview-filter-suggestions button:hover { color: #195bb8; background: #eaf2fe; }

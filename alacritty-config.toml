@@ -1,0 +1,64 @@
+# Alacritty 推荐配置（2026最新版）
+
+```yaml
+# ~/.config/alacritty/alacritty.toml
+window:
+  padding:
+    x: 10
+    y: 10
+  dynamic_padding: true
+  decorations: transparent
+  opacity: 0.95
+  blur: true
+
+font:
+  normal:
+    family: "SF Mono"          # 或你喜欢的字体
+    style: Regular
+  size: 14.0
+
+# 主题（推荐深色 + 好看）
+colors:
+  primary:
+    background: '0x1a1b26'
+    foreground: '0xc0caf5'
+
+  normal:
+    black:   '0x1a1b26'
+    red:     '0xf7768e'
+    green:   '0x9ece6a'
+    yellow:  '0xe0af68'
+    blue:    '0x7aa2f7'
+    magenta: '0xbb9af7'
+    cyan:    '0x7dcfff'
+    white:   '0xc0caf5'
+
+  bright:
+    black:   '0x414868'
+    red:     '0xf7768e'
+    green:   '0x9ece6a'
+    yellow:  '0xe0af68'
+    blue:    '0x7aa2f7'
+    magenta: '0xbb9af7'
+    cyan:    '0x7dcfff'
+    white:   '0xd9d7d3'
+
+key_bindings:
+  - { key: Key, mods: Command, action: Copy }
+  - { key: Key, mods: Command, action: Paste }
+  - { key: Key, mods: Command, action: Quit }
+  - { key: Key, mods: Command, action: FullScreen }
+
+mouse:
+  hide_when_typing: true
+```
+
+## 快捷键推荐
+
+- `Command + Enter` → 全屏
+- `Command + Shift + C` → 复制
+- `Command + Shift + V` → 粘贴
+- `Command + T` → 新标签
+- `Command + W` → 关闭当前标签
+- `Command + Shift + P` → 命令面板
+```

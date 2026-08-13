@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DataGrid, displayValue } from "./DataGrid";
+import { CELL_DISPLAY_MAX_CHARS, DataGrid, displayCellValue, displayValue } from "./DataGrid";
 
 describe("DataGrid", () => {
   it("明确区分 NULL 并显示结果截断状态", () => {
@@ -20,6 +20,20 @@ describe("DataGrid", () => {
 
   it("可以安全显示对象类型的单元格值", () => {
     expect(displayValue({ summary: "BLOB (128 bytes)" })).toBe('{"summary":"BLOB (128 bytes)"}');
+  });
+
+  it("长文本在单元格中截断，完整内容放在 title", () => {
+    const longText = "字".repeat(CELL_DISPLAY_MAX_CHARS + 40);
+    const { container } = render(<DataGrid table={{
+      columns: [{ name: "BODY", label: "BODY", typeName: "CLOB", jdbcType: 2005, nullable: true }],
+      rows: [[longText]],
+      truncated: false
+    }} />);
+
+    expect(screen.getByText(`${"字".repeat(CELL_DISPLAY_MAX_CHARS)}…`)).toBeInTheDocument();
+    expect(container.querySelector("td:not(.row-number)")).toHaveAttribute("title", longText);
+    expect(displayCellValue(longText).endsWith("…")).toBe(true);
+    expect(displayCellValue(longText).length).toBe(CELL_DISPLAY_MAX_CHARS + 1);
   });
 
   it("右键菜单不会被右键或菜单内部点击提前关闭", () => {

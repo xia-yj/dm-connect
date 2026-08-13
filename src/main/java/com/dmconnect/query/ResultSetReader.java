@@ -76,22 +76,28 @@ public final class ResultSetReader {
     }
 
     private static String readLimitedText(Reader reader, String label) throws IOException {
-        char[] buffer = new char[MAX_TEXT_CHARS + 1];
-        int total = 0;
-        while (total < buffer.length) {
-            int read = reader.read(buffer, total, buffer.length - total);
+        // Stream into a growable buffer instead of allocating MAX_TEXT_CHARS up front.
+        // Wide result sets with many short CLOBs previously paid ~2MB per cell.
+        StringBuilder text = new StringBuilder(Math.min(8_192, MAX_TEXT_CHARS));
+        char[] chunk = new char[8_192];
+        boolean truncated = false;
+        while (text.length() < MAX_TEXT_CHARS) {
+            int limit = Math.min(chunk.length, MAX_TEXT_CHARS - text.length());
+            int read = reader.read(chunk, 0, limit);
             if (read < 0) break;
             if (read == 0) {
                 int value = reader.read();
                 if (value < 0) break;
-                buffer[total++] = (char) value;
+                text.append((char) value);
             } else {
-                total += read;
+                text.append(chunk, 0, read);
             }
         }
-        boolean truncated = total > MAX_TEXT_CHARS;
-        return new String(buffer, 0, Math.min(total, MAX_TEXT_CHARS))
-                + (truncated ? "\n…<" + label + "已截断>" : "");
+        if (text.length() >= MAX_TEXT_CHARS) {
+            // One more read to detect overflow beyond the hard cap.
+            if (reader.read() >= 0) truncated = true;
+        }
+        return truncated ? text.substring(0, MAX_TEXT_CHARS) + "\n…<" + label + "已截断>" : text.toString();
     }
 
     private static String readLimitedBinary(InputStream input) throws IOException {

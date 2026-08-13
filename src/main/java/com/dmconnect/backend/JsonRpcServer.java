@@ -15,19 +15,21 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class JsonRpcServer implements AutoCloseable {
+    private static final int RPC_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
+    private static final int RPC_QUEUE_CAPACITY = 256;
+
     private final BackendService service;
     private final ObjectMapper mapper;
     private final ObjectWriter compactWriter;
     private final BufferedReader input;
     private final BufferedWriter output;
-    private final ExecutorService requests = Executors.newCachedThreadPool(runnable -> {
-        Thread thread = new Thread(runnable, "dm-connect-rpc");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ExecutorService requests;
     private final Object outputLock = new Object();
 
     public JsonRpcServer(BackendService service, ObjectMapper mapper, InputStream input, OutputStream output) {
@@ -36,6 +38,20 @@ public final class JsonRpcServer implements AutoCloseable {
         this.compactWriter = mapper.writer().without(SerializationFeature.INDENT_OUTPUT);
         this.input = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
         this.output = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8));
+        AtomicInteger counter = new AtomicInteger();
+        // Bounded pool: avoid unbounded thread growth when the UI fans out metadata/query RPCs.
+        this.requests = new ThreadPoolExecutor(
+                RPC_THREADS,
+                RPC_THREADS,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(RPC_QUEUE_CAPACITY),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "dm-connect-rpc-" + counter.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     public void run() throws Exception {

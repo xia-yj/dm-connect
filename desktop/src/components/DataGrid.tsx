@@ -2,10 +2,20 @@ import { AlertTriangle, Filter, Rows3, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ColumnMetadata, ResultTable } from "../types";
 
+/** Soft cap for what we paint into each cell; full text stays in title/edit. */
+export const CELL_DISPLAY_MAX_CHARS = 200;
+
 export function displayValue(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value).replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)(Z|[+-]\d{2}:?\d{2})?$/, "$1 $2$3");
+}
+
+/** Short label for grid cells so wide/long results do not flood the DOM. */
+export function displayCellValue(value: unknown, maxChars = CELL_DISPLAY_MAX_CHARS): string {
+  const full = displayValue(value);
+  if (full.length <= maxChars) return full;
+  return `${full.slice(0, maxChars)}…`;
 }
 
 function editorValue(value: unknown): string {
@@ -96,13 +106,14 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = 
               const isEditing = editing?.rowIndex === rowIndex && editing.columnIndex === columnIndex;
               const cellKey = `${rowIndex}:${columnIndex}`;
               const editable = Boolean(onEditCell) && !isPendingDelete && isColumnEditable(table.columns[columnIndex]);
-              const title = isPendingDelete ? "已标记删除，保存后生效" : (editable ? "双击编辑" : (value == null ? "NULL" : displayValue(value)));
+              const fullText = value == null ? "NULL" : displayValue(value);
+              const title = isPendingDelete ? "已标记删除，保存后生效" : (editable ? (fullText === "NULL" ? "双击编辑" : `双击编辑\n${fullText}`) : fullText);
               return <td key={columnIndex} className={`${editable ? "editable-cell" : ""}${editedCellKeys.has(cellKey) ? " edited-cell" : ""}`} title={title} onClick={event => selectCell(event.currentTarget)} onDoubleClick={() => {
                 if (editable) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
               }}>
                 {isEditing
                   ? <input className="grid-cell-editor" autoFocus value={editing.value} onChange={event => setEditing({ ...editing, value: event.target.value })} onKeyDown={event => { if (event.key === "Enter") commitEdit(); if (event.key === "Escape") setEditing(null); }} onBlur={commitEdit} />
-                  : <span className={value == null ? "null-value" : ""}>{isDraftRow && (value == null || value === "") ? "" : displayValue(value)}</span>}
+                  : <span className={value == null ? "null-value" : ""}>{isDraftRow && (value == null || value === "") ? "" : displayCellValue(value)}</span>}
               </td>;
             })}</tr>;
             })}

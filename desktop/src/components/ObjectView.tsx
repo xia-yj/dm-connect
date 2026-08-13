@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Braces, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Columns3, Download, FileCode2, KeyRound, LoaderCircle, Search, Table2, View, X, RefreshCw, Plus, Minus, Undo2, Redo2, Save, Check, RotateCcw } from "lucide-react";
 import type { ColumnInfo, ObjectLoadResult, PagedResultTable, PendingTableChange, PreviewFilter, TableSessionStatus } from "../types";
 import { DataGrid } from "./DataGrid";
+import { FilterSyntaxInput } from "./FilterSyntaxInput";
 
 type DetailTab = "preview" | "columns" | "constraints" | "indexes" | "ddl";
 type PendingCellEdit = { rowIndex: number; columnIndex: number; column: string; value: string | null; originalValue: unknown; keyValues: Record<string, unknown> };
@@ -466,15 +467,23 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
     <div className="preview-filter">
       <Search size={15} />
       <div className="preview-filter-input-wrap">
-        <input id={filterColumnListId} value={filterInput} onChange={event => { setFilterInput(event.target.value); setFilterSuggestionsOpen(true); setActiveFilterSuggestion(0); }} onFocus={() => setFilterSuggestionsOpen(filterInput.trim().length > 0)} onKeyDown={event => {
-          if (event.key === "Escape") { setFilterSuggestionsOpen(false); return; }
-          if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowDown") { event.preventDefault(); setActiveFilterSuggestion(index => Math.min(index + 1, filterSuggestions.length - 1)); return; }
-          if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowUp") { event.preventDefault(); setActiveFilterSuggestion(index => Math.max(index - 1, 0)); return; }
-          if (event.key === "Enter") {
-            if (filterSuggestionsOpen && filterSuggestions.length > 0) { event.preventDefault(); chooseFilterColumn(filterSuggestions[activeFilterSuggestion]?.name ?? filterSuggestions[0].name); return; }
-            setFilterSuggestionsOpen(false); void applyFilter();
-          }
-        }} placeholder="筛选：列名 = 1，可用 AND 连接多个条件" aria-label="数据预览筛选条件" />
+        <FilterSyntaxInput
+          id={filterColumnListId}
+          value={filterInput}
+          placeholder="筛选：列名 = 1，可用 AND 连接多个条件"
+          aria-label="数据预览筛选条件"
+          onChange={next => { setFilterInput(next); setFilterSuggestionsOpen(true); setActiveFilterSuggestion(0); }}
+          onFocus={() => setFilterSuggestionsOpen(filterInput.trim().length > 0)}
+          onKeyDown={event => {
+            if (event.key === "Escape") { setFilterSuggestionsOpen(false); return; }
+            if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowDown") { event.preventDefault(); setActiveFilterSuggestion(index => Math.min(index + 1, filterSuggestions.length - 1)); return; }
+            if (filterSuggestionsOpen && filterSuggestions.length > 0 && event.key === "ArrowUp") { event.preventDefault(); setActiveFilterSuggestion(index => Math.max(index - 1, 0)); return; }
+            if (event.key === "Enter") {
+              if (filterSuggestionsOpen && filterSuggestions.length > 0) { event.preventDefault(); chooseFilterColumn(filterSuggestions[activeFilterSuggestion]?.name ?? filterSuggestions[0].name); return; }
+              setFilterSuggestionsOpen(false); void applyFilter();
+            }
+          }}
+        />
         {filterSuggestionsOpen && filterSuggestions.length > 0 && <div className="preview-filter-suggestions">{filterSuggestions.map((column, index) => <button type="button" key={column.name} className={index === activeFilterSuggestion ? "active" : ""} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActiveFilterSuggestion(index)} onClick={() => chooseFilterColumn(column.name)}>{column.name}</button>)}</div>}
       </div>
       {previewFilter && <button className="clear-preview-filter" onClick={() => void applyFilter(true)} disabled={previewLoading} title="清除筛选"><X size={15} />清除</button>}

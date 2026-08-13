@@ -38,7 +38,7 @@ final class BackendWorkspace implements AutoCloseable {
     }
 
     QuerySession openSession() throws SQLException {
-        QuerySession session = new QuerySession(openConnection());
+        QuerySession session = new QuerySession(openConnection(), this::openConnection);
         sessions.add(session);
         return session;
     }

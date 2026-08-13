@@ -1,5 +1,7 @@
 package com.dmconnect.query;
 
+import com.dmconnect.connection.JdbcConnectionFactory;
+import com.dmconnect.connection.JdbcConnectionHealth;
 import com.dmconnect.model.ExecutionResult;
 import com.dmconnect.model.ResultTable;
 import com.dmconnect.model.StatementOutcome;
@@ -18,14 +20,22 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class QuerySession implements AutoCloseable {
     /** 查询结果的绝对上限，避免任意 SQL 将大量数据加载到客户端。 */
     public static final int MAX_RESULT_ROWS = 100;
-    private final Connection connection;
+    private Connection connection;
+    private final JdbcConnectionFactory connectionFactory;
     private final Object transactionLock = new Object();
     private final AtomicReference<Statement> runningStatement = new AtomicReference<>();
     private volatile boolean pendingTransaction;
+    private volatile boolean autoCommit = true;
     private volatile boolean closed;
+    private long lastValidatedNanos;
 
     public QuerySession(Connection connection) throws SQLException {
+        this(connection, null);
+    }
+
+    public QuerySession(Connection connection, JdbcConnectionFactory connectionFactory) throws SQLException {
         this.connection = connection;
+        this.connectionFactory = connectionFactory;
         this.connection.setAutoCommit(true);
     }
 
@@ -90,6 +100,7 @@ public final class QuerySession implements AutoCloseable {
         synchronized (transactionLock) {
             ensureOpen();
             connection.setAutoCommit(autoCommit);
+            this.autoCommit = autoCommit;
             if (autoCommit) pendingTransaction = false;
         }
     }
@@ -97,7 +108,7 @@ public final class QuerySession implements AutoCloseable {
     public boolean isAutoCommit() throws SQLException {
         synchronized (transactionLock) {
             ensureOpen();
-            return connection.getAutoCommit();
+            return autoCommit;
         }
     }
 
@@ -139,7 +150,31 @@ public final class QuerySession implements AutoCloseable {
     }
 
     private void ensureOpen() throws SQLException {
-        if (closed || connection.isClosed()) throw new SQLException("SQL 会话已经关闭");
+        if (closed) throw new SQLException("SQL 会话已经关闭");
+        long validationStarted = System.nanoTime();
+        boolean fullValidation = lastValidatedNanos == 0
+                || validationStarted - lastValidatedNanos >= JdbcConnectionHealth.VALIDATION_CACHE_NANOS;
+        if (JdbcConnectionHealth.isUsable(connection, lastValidatedNanos)) {
+            if (fullValidation) lastValidatedNanos = validationStarted;
+            return;
+        }
+        if (pendingTransaction) {
+            throw new SQLException("数据库连接已失效，未提交事务无法自动恢复；请关闭此 SQL 标签后重新打开");
+        }
+        if (connectionFactory == null) throw new SQLException("SQL 会话连接已失效");
+
+        Connection replacement = connectionFactory.open();
+        boolean ready = false;
+        try {
+            replacement.setAutoCommit(autoCommit);
+            ready = true;
+        } finally {
+            if (!ready) try { replacement.close(); } catch (SQLException ignored) { }
+        }
+        Connection stale = connection;
+        connection = replacement;
+        lastValidatedNanos = System.nanoTime();
+        try { stale.close(); } catch (SQLException ignored) { }
     }
 
     @Override
@@ -148,9 +183,11 @@ public final class QuerySession implements AutoCloseable {
             if (closed) return;
             try {
                 if (pendingTransaction && !connection.getAutoCommit()) connection.rollback();
+            } catch (SQLException ignored) {
+                // The connection may already be gone; closing a tab remains best effort.
             } finally {
                 closed = true;
-                connection.close();
+                try { connection.close(); } catch (SQLException ignored) { }
             }
         }
     }

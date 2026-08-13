@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.DriverManager;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,6 +72,46 @@ class QuerySessionTest {
                 assertThat(outcome.table().rows()).hasSize(1);
                 assertThat(outcome.table().rows().get(0)).containsExactly(1, null);
             });
+        }
+    }
+
+    @Test
+    void reconnectsAStaleAutoCommitSessionBeforeExecuting() throws Exception {
+        String url = "jdbc:h2:mem:query_reconnect;DB_CLOSE_DELAY=-1";
+        var stale = DriverManager.getConnection(url);
+        AtomicInteger reconnects = new AtomicInteger();
+        try (QuerySession session = new QuerySession(stale, () -> {
+            reconnects.incrementAndGet();
+            return DriverManager.getConnection(url);
+        })) {
+            stale.close();
+
+            var result = session.execute(List.of("SELECT 42 AS ANSWER"), 100);
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.outcomes().get(0).table().rows().get(0).get(0)).isEqualTo(42);
+            assertThat(reconnects).hasValue(1);
+        }
+    }
+
+    @Test
+    void doesNotReconnectWhenAnUncommittedTransactionWasLost() throws Exception {
+        String url = "jdbc:h2:mem:query_lost_transaction;DB_CLOSE_DELAY=-1";
+        var stale = DriverManager.getConnection(url);
+        AtomicInteger reconnects = new AtomicInteger();
+        try (QuerySession session = new QuerySession(stale, () -> {
+            reconnects.incrementAndGet();
+            return DriverManager.getConnection(url);
+        })) {
+            session.setAutoCommit(false);
+            assertThat(session.execute(List.of("CREATE TABLE T(ID INT)"), 100).success()).isTrue();
+            stale.close();
+
+            var result = session.execute(List.of("SELECT 1"), 100);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorMessage()).contains("未提交事务无法自动恢复");
+            assertThat(reconnects).hasValue(0);
         }
     }
 }

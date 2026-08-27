@@ -123,12 +123,22 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           RELEASE_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          ARM64_ZIP="$(find dist/macos-arm64 -name "DM-Connect-${VERSION}-arm64.app.zip" -print -quit)"
+          X64_ZIP="$(find dist/macos-x64 -name "DM-Connect-${VERSION}-x64.app.zip" -print -quit)"
+          if [ -z "$ARM64_ZIP" ] || [ -z "$X64_ZIP" ]; then
+            echo "未找到用于自动更新的 macOS ZIP" >&2
+            exit 1
+          fi
+          ARM64_SHA="$(sha256sum "$ARM64_ZIP" | awk '{print $1}')"
+          X64_SHA="$(sha256sum "$X64_ZIP" | awk '{print $1}')"
           cat > dist/update.json <<EOF
           {
             "version": "${VERSION}",
             "build": "${RELEASE_TAG}",
             "arm64Url": "${RELEASE_BASE}/DM-Connect-${VERSION}-arm64.app.zip",
             "x64Url": "${RELEASE_BASE}/DM-Connect-${VERSION}-x64.app.zip",
+            "arm64Sha256": "${ARM64_SHA}",
+            "x64Sha256": "${X64_SHA}",
             "notes": "DM Connect ${RELEASE_TAG}"
           }
           EOF

@@ -37,6 +37,11 @@ class RedisTextCodecTest {
         assertThat(decode(0xFE)).isEqualTo("[binary FE]");
     }
 
+    @Test
+    void doesNotDeserializeArbitraryFstObjects() {
+        assertThat(decode(0xFC, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05)).isEqualTo("[binary FC050102030405]");
+    }
+
     private String decode(int... values) {
         byte[] bytes = new byte[values.length];
         for (int index = 0; index < values.length; index++) bytes[index] = (byte) values[index];

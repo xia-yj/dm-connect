@@ -37,17 +37,7 @@ export class JavaBridge {
     if (!existsSync(javaExecutable) || !existsSync(appJar)) {
       throw new Error(`Java 后端资源不存在：${backendRoot}`);
     }
-    // The legacy Redis cache uses FST 2.48, which reflects over JDK value types on Java 17.
-    const javaOptions = [
-      "-Dfile.encoding=UTF-8",
-      "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-      "--add-opens", "java.base/java.math=ALL-UNNAMED",
-      "--add-opens", "java.base/java.net=ALL-UNNAMED",
-      "--add-opens", "java.base/java.text=ALL-UNNAMED",
-      "--add-opens", "java.base/java.time=ALL-UNNAMED",
-      "--add-opens", "java.base/java.util=ALL-UNNAMED",
-      "--add-opens", "java.base/java.util.concurrent=ALL-UNNAMED"
-    ];
+    const javaOptions = ["-Dfile.encoding=UTF-8"];
     if (process.env.DMCONNECT_DATA_DIR) {
       javaOptions.push(`-Ddmconnect.dataDir=${process.env.DMCONNECT_DATA_DIR}`);
     }

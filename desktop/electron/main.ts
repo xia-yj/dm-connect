@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } from "electron";
 import { createWriteStream, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { JavaBridge, BridgeError } from "./java-bridge";
+import { parseUpdateManifest, requireAllowedHttpsUrl, timingSafeEqualHex, type AvailableUpdate } from "./update-security";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "dmconnect", privileges: { standard: true, secure: true, supportFetchAPI: true } }
@@ -30,88 +32,50 @@ const bridge = new JavaBridge();
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 
-interface UpdateManifest {
-  version: string;
-  build?: string;
-  url?: string;
-  arm64Url?: string;
-  x64Url?: string;
-  notes?: string;
-}
-
-interface AvailableUpdate {
-  version: string;
-  build?: string;
-  url: string;
-  notes?: string;
-}
-
 function sendUpdateStatus(status: string): void {
   mainWindow?.webContents.send("update:status", status);
 }
 
-function compareVersion(left: string, right: string): number {
-  const parse = (value: string) => value.split(".").map(part => Number.parseInt(part.replace(/\D.*$/, ""), 10) || 0);
-  const a = parse(left);
-  const b = parse(right);
-  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
-    if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0) ? 1 : -1;
-  }
-  return 0;
-}
-
-function updateUrlForCurrentArchitecture(manifest: UpdateManifest): string | undefined {
-  if (process.arch === "arm64") return manifest.arm64Url ?? manifest.url;
-  if (process.arch === "x64") return manifest.x64Url ?? manifest.url;
-  return undefined;
-}
-
-function requireHttpUrl(value: string, label: string): URL {
-  let url: URL;
-  try { url = new URL(value.trim()); } catch { throw new Error(`${label}不正确`); }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${label}仅支持 http 或 https 地址`);
-  return url;
-}
-
 async function checkForUpdate(manifestUrlText: string): Promise<AvailableUpdate | null> {
-  const manifestUrl = requireHttpUrl(manifestUrlText, "更新清单地址");
+  const manifestUrl = requireAllowedHttpsUrl(manifestUrlText, "更新清单地址");
   const response = await net.fetch(manifestUrl.toString());
   if (!response.ok) throw new Error(`读取更新清单失败（HTTP ${response.status}）`);
-  let manifest: UpdateManifest;
-  try { manifest = JSON.parse(await response.text()) as UpdateManifest; } catch { throw new Error("更新清单不是有效的 JSON"); }
-  if (!manifest.version || typeof manifest.version !== "string") throw new Error("更新清单缺少版本号");
-  const url = updateUrlForCurrentArchitecture(manifest);
-  if (!url) throw new Error(`更新清单未提供 ${process.arch} 架构的安装包`);
-  requireHttpUrl(url, "更新包地址");
-  return compareVersion(manifest.version, app.getVersion()) > 0 ? { version: manifest.version, build: manifest.build, url, notes: manifest.notes } : null;
+  return parseUpdateManifest(await response.text(), app.getVersion(), process.arch);
 }
 
 function isHttp2ProtocolError(cause: unknown): boolean {
   return String(cause).includes("ERR_HTTP2_PROTOCOL_ERROR");
 }
 
-async function writeUpdateArchive(response: Response, archive: string): Promise<void> {
+async function writeUpdateArchive(response: Response, archive: string, expectedSha256: string): Promise<void> {
   if (!response.ok || !response.body) throw new Error(`下载更新包失败（HTTP ${response.status}）`);
   const total = Number(response.headers.get("content-length") ?? "0");
   let received = 0;
+  const digest = createHash("sha256");
   const progress = new Transform({ transform(chunk: Buffer, _encoding, callback) {
     received += chunk.length;
+    digest.update(chunk);
     sendUpdateStatus(total > 0 ? `正在下载新版本… ${Math.min(100, Math.floor(received / total * 100))}%` : "正在下载新版本…");
     callback(null, chunk);
   } });
   await pipeline(Readable.fromWeb(response.body as never), progress, createWriteStream(archive));
+  const actual = digest.digest("hex");
+  if (!timingSafeEqualHex(actual, expectedSha256)) {
+    await fs.rm(archive, { force: true });
+    throw new Error("更新包校验失败，已取消安装");
+  }
 }
 
-async function downloadUpdateArchive(url: string, archive: string): Promise<void> {
+async function downloadUpdateArchive(url: string, archive: string, expectedSha256: string): Promise<void> {
   try {
-    await writeUpdateArchive(await net.fetch(url), archive);
+    await writeUpdateArchive(await net.fetch(url), archive, expectedSha256);
   } catch (cause) {
     if (!isHttp2ProtocolError(cause)) throw cause;
     // GitHub 的大文件下载偶发触发 Chromium 网络栈的 HTTP/2 协议错误。
     // Node fetch 使用独立的 HTTP 客户端，作为兼容回退通道继续下载。
     sendUpdateStatus("下载连接异常，正在切换兼容下载方式…");
     await fs.rm(archive, { force: true });
-    await writeUpdateArchive(await globalThis.fetch(url), archive);
+    await writeUpdateArchive(await globalThis.fetch(url), archive, expectedSha256);
   }
 }
 
@@ -133,7 +97,7 @@ async function downloadAndInstallUpdate(manifestUrl: string): Promise<void> {
   sendUpdateStatus("正在下载新版本…");
   const archive = join(tmpdir(), `dm-connect-update-${crypto.randomUUID()}.zip`);
   try {
-    await downloadUpdateArchive(update.url, archive);
+    await downloadUpdateArchive(update.url, archive, update.sha256);
     const parent = resolve(currentApp, "..");
     const scriptPath = join(tmpdir(), `install-dm-connect-${crypto.randomUUID()}.sh`);
     const script = `#!/bin/bash

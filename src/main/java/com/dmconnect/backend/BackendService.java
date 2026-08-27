@@ -53,7 +53,7 @@ import org.bson.Document;
 import io.lettuce.core.KeyScanCursor;
 
 public final class BackendService implements AutoCloseable {
-    public static final String VERSION = "2.0.0";
+    public static final String VERSION = "2.0.11";
 
     private final AppContext context;
     private final ObjectMapper mapper;
@@ -1076,10 +1076,9 @@ public final class BackendService implements AutoCloseable {
         if (statements.isEmpty()) throw new RpcException("NO_SQL", "没有可执行的 SQL");
         List<String> dangerous = dangerousSqlDetector.findDangerous(statements);
         if (!dangerous.isEmpty() && !params.path("allowDangerous").asBoolean(false)) {
-            throw new RpcException("DANGEROUS_SQL", "检测到 DROP 或 TRUNCATE 语句", dangerous);
+            throw new RpcException("DANGEROUS_SQL", "检测到可能造成数据丢失或权限变更的 SQL", dangerous);
         }
-        // 结果集始终固定在 100 行以内，不能由客户端请求扩大，防止大查询耗尽桌面端内存。
-        int maxRows = QuerySession.MAX_RESULT_ROWS;
+        int maxRows = QuerySession.clampResultRows(params.path("maxRows").asInt(QuerySession.DEFAULT_RESULT_ROWS));
         ExecutionResult execution = query.session().execute(statements, maxRows);
         String historyWarning = "";
         try {
@@ -1335,12 +1334,12 @@ public final class BackendService implements AutoCloseable {
                 .filter(session -> session.profileId().equals(profileId)).toList();
         matches.forEach(session -> {
             tableSessions.remove(session.id());
-            session.close();
+            closeQuietly(session);
         });
     }
 
     private void disconnectAll() {
-        tableSessions.values().forEach(TableSession::close);
+        tableSessions.values().forEach(BackendService::closeQuietly);
         tableSessions.clear();
         queries.values().forEach(BackendQuery::close);
         queries.clear();
@@ -1354,6 +1353,14 @@ public final class BackendService implements AutoCloseable {
             }
         });
         nativeWorkspaces.clear();
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+            // Reset or shutdown should continue releasing remaining sessions.
+        }
     }
 
     private static String rootMessage(Throwable throwable) {

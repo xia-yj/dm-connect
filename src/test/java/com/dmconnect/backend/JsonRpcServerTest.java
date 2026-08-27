@@ -44,7 +44,7 @@ class JsonRpcServerTest {
                 assertThat(response.await(5, TimeUnit.SECONDS)).isTrue();
                 String payload = output.toString(StandardCharsets.UTF_8);
                 assertThat(payload.lines()).hasSize(1);
-                assertThat(mapper.readTree(payload).path("result").path("version").asText()).isEqualTo("2.0.0");
+                assertThat(mapper.readTree(payload).path("result").path("version").asText()).isEqualTo(BackendService.VERSION);
             }
         } finally {
             if (previous == null) System.clearProperty(AppPaths.DATA_DIR_PROPERTY);

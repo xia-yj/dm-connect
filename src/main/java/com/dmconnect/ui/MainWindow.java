@@ -106,7 +106,7 @@ public final class MainWindow implements AutoCloseable {
                 item("清除已保存密码和 SQL 历史", this::clearLocalData));
 
         Menu help = new Menu("帮助", null, item("关于数据库连接工具", () -> Dialogs.info(stage,
-                "关于数据库连接工具", "数据库连接工具 2.0.0 Legacy\nJavaFX 回退界面")));
+                "关于数据库连接工具", "数据库连接工具 2.0.11 Legacy\nJavaFX 回退界面，正式包已改用 Electron")));
         MenuBar menuBar = new MenuBar(file, connection, tools, help);
         menuBar.setUseSystemMenuBar(true);
         return menuBar;

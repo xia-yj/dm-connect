@@ -20,21 +20,18 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class QuerySession extends AbstractSession {
 
-    /** 查询结果的绝对上限，避免任意 SQL 将大量数据加载到客户端。 */
-    public static final int MAX_RESULT_ROWS = 100;
+    public static final int DEFAULT_RESULT_ROWS = 100;
+    public static final int MAX_RESULT_ROWS = 5_000;
+    public static final int[] ALLOWED_RESULT_ROWS = {100, 1_000, 5_000};
+    private final AtomicReference<Statement> runningStatement = new AtomicReference<>();
 
     public QuerySession(Connection connection) throws SQLException {
         this(connection, null);
     }
 
-    public QuerySession(Connection connection, JdbcConnectionFactory connectionFactory, int maxResultRows) throws SQLException {
+    public QuerySession(Connection connection, JdbcConnectionFactory connectionFactory) throws SQLException {
         super(new ManagedJdbcConnection(connection, connectionFactory));
         this.managedConnection.get().setAutoCommit(true);
-        this.maxResultRows = Math.max(1, maxResultRows);
-    }
-
-    public QuerySession(Connection connection, JdbcConnectionFactory connectionFactory) throws SQLException {
-        this(connection, connectionFactory, 100);
     }
 
     private Connection connection() {
@@ -67,7 +64,7 @@ public final class QuerySession extends AbstractSession {
                             List<StatementOutcome> outcomes) throws SQLException {
         try (Statement statement = connection().createStatement()) {
             runningStatement.set(statement);
-            int resultLimit = Math.min(maxRows, MAX_RESULT_ROWS);
+            int resultLimit = clampResultRows(maxRows);
             statement.setMaxRows(resultLimit + 1);
             statement.setFetchSize(resultLimit + 1);
             boolean hasResultSet = statement.execute(sql);
@@ -134,10 +131,6 @@ public final class QuerySession extends AbstractSession {
         }
     }
 
-    private void ensureOpen() throws SQLException {
-        super.ensureOpen();
-    }
-
     @Override
     protected String getCloseMessage() {
         return "SQL 会话已经关闭";
@@ -146,6 +139,12 @@ public final class QuerySession extends AbstractSession {
     @Override
     protected String getLostTransactionMessage() {
         return "数据库连接已失效，未提交事务无法自动恢复；请关闭此 SQL 标签后重新打开";
+    }
+
+    public static int clampResultRows(int requested) {
+        if (requested <= DEFAULT_RESULT_ROWS) return DEFAULT_RESULT_ROWS;
+        if (requested <= 1_000) return 1_000;
+        return MAX_RESULT_ROWS;
     }
 
     private static long elapsedMillis(long startedNanos) {

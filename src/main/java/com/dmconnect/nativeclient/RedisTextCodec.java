@@ -1,9 +1,7 @@
 package com.dmconnect.nativeclient;
 
 import io.lettuce.core.codec.RedisCodec;
-import org.nustaq.serialization.FSTObjectInput;
 
-import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.CodingErrorAction;
@@ -78,16 +76,7 @@ final class RedisTextCodec implements RedisCodec<String, String> {
         if (tag == FST_BOOLEAN_TRUE) return "true";
         if (tag == FST_BIG_INT) return String.valueOf(decodeFstInt(raw));
         if (tag == FST_BIG_LONG) return String.valueOf(decodeFstLong(raw));
-        try (FSTObjectInput input = new FSTObjectInput(new ByteArrayInputStream(raw))) {
-            Object value = input.readObject();
-            if (value == null) return "(null)";
-            if (value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character) {
-                return String.valueOf(value);
-            }
-            return null;
-        } catch (Exception ignored) {
-            return null;
-        }
+        return null;
     }
 
     private static boolean isFstScalarTag(int tag) {

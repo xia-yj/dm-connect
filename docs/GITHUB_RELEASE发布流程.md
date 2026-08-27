@@ -11,13 +11,16 @@ Tag 自动触发已恢复。推送 `v*` Tag 会自动构建并创建 Release。
 ```text
 desktop/package.json
 desktop/package-lock.json
+pom.xml
+src/main/java/com/dmconnect/backend/BackendService.java
+README.md
 ```
 
-两个文件的版本号必须一致。Tag 使用 `v` 加版本号，例如：
+这些文件的版本号必须一致。Tag 使用 `v` 加版本号，例如：
 
 ```text
-应用版本：2.0.8
-Git Tag：v2.0.8
+应用版本：2.0.11
+Git Tag：v2.0.11
 ```
 
 ## 二、提交代码并发布版本
@@ -33,11 +36,11 @@ git push origin main
 修改版本号后，创建并推送 Tag：
 
 ```bash
-git tag v2.0.9
-git push origin v2.0.9
+git tag v2.0.11
+git push origin v2.0.11
 ```
 
-Tag 推送后会自动触发 GitHub Actions。不要重复使用已经发布过的 Tag；如果需要重新发布，应增加补丁版本号，例如 `v2.0.10`。
+Tag 推送后会自动触发 GitHub Actions。不要重复使用已经发布过的 Tag；如果需要重新发布，应增加补丁版本号，例如 `v2.0.12`。
 
 ## 三、GitHub Actions 构建内容
 
@@ -86,21 +89,24 @@ https://github.com/xia-yj/dm-connect/releases/latest/download/update.json
 
 ```json
 {
-  "version": "2.0.9",
-  "build": "v2.0.9",
-  "arm64Url": "https://github.com/xia-yj/dm-connect/releases/download/v2.0.9/DM-Connect-2.0.9-arm64.app.zip",
-  "x64Url": "https://github.com/xia-yj/dm-connect/releases/download/v2.0.9/DM-Connect-2.0.9-x64.app.zip",
-  "notes": "DM Connect v2.0.9"
+  "version": "2.0.11",
+  "build": "v2.0.11",
+  "arm64Url": "https://github.com/xia-yj/dm-connect/releases/download/v2.0.11/DM-Connect-2.0.11-arm64.app.zip",
+  "x64Url": "https://github.com/xia-yj/dm-connect/releases/download/v2.0.11/DM-Connect-2.0.11-x64.app.zip",
+  "arm64Sha256": "64位小写十六进制",
+  "x64Sha256": "64位小写十六进制",
+  "notes": "DM Connect v2.0.11"
 }
 ```
 
-客户端点击“检查更新”后，会读取清单、比较版本号，并下载对应架构的更新 ZIP。macOS 支持下载完成后自动替换应用并重启。
+客户端只接受 `github.com` 的 HTTPS 清单和安装包。点击“检查更新”后会读取清单、比较版本号，下载对应架构的更新 ZIP，并在替换 `.app` 前校验 SHA-256。
 
 ## 六、常见检查项
 
 - GitHub 仓库必须保持公开，否则客户端无法直接读取 Release 文件。
-- `desktop/package.json`、`desktop/package-lock.json` 和 Tag 版本号必须一致。
-- Tag 必须以 `v` 开头，例如 `v2.0.9`。
+- `desktop/package.json`、`desktop/package-lock.json`、`pom.xml`、`BackendService.VERSION` 和 Tag 版本号必须一致。
+- Tag 必须以 `v` 开头，例如 `v2.0.11`。
+- `update.json` 必须包含 `arm64Sha256` 和 `x64Sha256`，否则客户端会拒绝安装。
 - Actions 失败时先打开失败的 job，查看 `Build x64 installer` 或 `Build macOS ... packages` 日志。
 - Release 只有在所有构建 job 成功后才会创建。
 - 手动运行 Actions 不会创建 Release。
@@ -109,14 +115,14 @@ https://github.com/xia-yj/dm-connect/releases/latest/download/update.json
 ## 七、完整示例
 
 ```bash
-# 修改 desktop/package.json 和 desktop/package-lock.json 为 2.0.9
-git add desktop/package.json desktop/package-lock.json
-git commit -m "chore: bump application version to 2.0.9"
+# 将 desktop/package.json、desktop/package-lock.json、pom.xml、BackendService.VERSION 改为 2.0.11
+git add desktop/package.json desktop/package-lock.json pom.xml src/main/java/com/dmconnect/backend/BackendService.java README.md
+git commit -m "chore: bump application version to 2.0.11"
 git push origin main
 
 # 触发构建和 Release
-git tag v2.0.9
-git push origin v2.0.9
+git tag v2.0.11
+git push origin v2.0.11
 ```
 
-完成后，在 GitHub Releases 页面即可看到 `DM Connect v2.0.9` 及所有平台安装包。
+完成后，在 GitHub Releases 页面即可看到 `DM Connect v2.0.11` 及所有平台安装包。

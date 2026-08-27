@@ -28,7 +28,7 @@ class BackendServiceTest {
             ObjectMapper mapper = new JsonStore().mapper();
             try (BackendService service = new BackendService(context, mapper)) {
                 Map<?, ?> initial = (Map<?, ?>) service.handle("app.bootstrap", mapper.createObjectNode());
-                assertThat(initial.get("version")).isEqualTo("2.0.0");
+                assertThat(initial.get("version")).isEqualTo(BackendService.VERSION);
                 assertThat(initial.get("profiles")).asList().isEmpty();
                 assertThat(initial.get("drivers")).asList().hasSize(4);
                 assertThat((java.util.List<?>) initial.get("drivers")).allSatisfy(item ->

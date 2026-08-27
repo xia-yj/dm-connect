@@ -12,25 +12,28 @@ class QuerySessionTest {
     @Test
     void limitsRowsAndMarksTruncation() throws Exception {
         try (QuerySession session = new QuerySession(DriverManager.getConnection("jdbc:h2:mem:limit"))) {
-            var result = session.execute(List.of("SELECT X FROM SYSTEM_RANGE(1, 25)"), 10);
+            var result = session.execute(List.of("SELECT X FROM SYSTEM_RANGE(1, 125)"), QuerySession.DEFAULT_RESULT_ROWS);
 
             assertThat(result.success()).isTrue();
             assertThat(result.outcomes()).hasSize(1);
-            assertThat(result.outcomes().get(0).table().rows()).hasSize(10);
+            assertThat(result.outcomes().get(0).table().rows()).hasSize(QuerySession.DEFAULT_RESULT_ROWS);
             assertThat(result.outcomes().get(0).table().truncated()).isTrue();
         }
     }
 
     @Test
-    void neverAllowsMoreThanOneHundredRows() throws Exception {
+    void clampsRequestedRowLimitToAllowedValues() throws Exception {
         try (QuerySession session = new QuerySession(DriverManager.getConnection("jdbc:h2:mem:absolute-limit"))) {
             var result = session.execute(List.of("SELECT X FROM SYSTEM_RANGE(1, 125)"), 10_000);
 
             assertThat(result.success()).isTrue();
             assertThat(result.outcomes()).singleElement().satisfies(outcome -> {
-                assertThat(outcome.table().rows()).hasSize(QuerySession.MAX_RESULT_ROWS);
-                assertThat(outcome.table().truncated()).isTrue();
+                assertThat(outcome.table().rows()).hasSize(125);
+                assertThat(outcome.table().truncated()).isFalse();
             });
+            assertThat(QuerySession.clampResultRows(10_000)).isEqualTo(QuerySession.MAX_RESULT_ROWS);
+            assertThat(QuerySession.clampResultRows(250)).isEqualTo(1_000);
+            assertThat(QuerySession.clampResultRows(50)).isEqualTo(QuerySession.DEFAULT_RESULT_ROWS);
         }
     }
 

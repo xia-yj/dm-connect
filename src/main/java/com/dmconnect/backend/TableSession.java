@@ -42,11 +42,13 @@ public final class TableSession extends AbstractSession {
         }
     }
 
-    boolean isAutoCommit() throws SQLException {
+    @Override
+    public boolean isAutoCommit() throws SQLException {
         return super.isAutoCommit();
     }
 
-    void setAutoCommit(boolean autoCommit) throws SQLException {
+    @Override
+    public void setAutoCommit(boolean autoCommit) throws SQLException {
         super.setAutoCommit(autoCommit);
     }
 
@@ -57,15 +59,18 @@ public final class TableSession extends AbstractSession {
         }
     }
 
-    boolean hasPendingTransaction() {
+    @Override
+    public boolean hasPendingTransaction() {
         return super.hasPendingTransaction();
     }
 
-    void commit() throws SQLException {
+    @Override
+    public void commit() throws SQLException {
         super.commit();
     }
 
-    void rollback() throws SQLException {
+    @Override
+    public void rollback() throws SQLException {
         super.rollback();
     }
 
@@ -88,10 +93,6 @@ public final class TableSession extends AbstractSession {
             ensureOpen();
             managedConnection.get().releaseSavepoint(savepoint);
         }
-    }
-
-    private void ensureOpen() throws SQLException {
-        super.ensureOpen();
     }
 
     @Override

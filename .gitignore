@@ -4,3 +4,4 @@ desktop/dist/
 desktop/dist-electron/
 release-backups/
 .DS_Store
+.claude/

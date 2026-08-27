@@ -12,11 +12,8 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -42,14 +39,20 @@ public final class VaultService implements AutoCloseable {
 
     private final AppPaths paths;
     private final JsonStore store;
+    private final LocalSecretStore secretStore;
     private final SecureRandom random = new SecureRandom();
     private byte[] keyBytes;
     private VaultFile vault;
     private Path legacyBackup;
 
     public VaultService(AppPaths paths, JsonStore store) {
+        this(paths, store, new FileLocalSecretStore(paths));
+    }
+
+    public VaultService(AppPaths paths, JsonStore store, LocalSecretStore secretStore) {
         this.paths = paths;
         this.store = store;
+        this.secretStore = secretStore;
     }
 
     public synchronized boolean exists() {
@@ -67,13 +70,14 @@ public final class VaultService implements AutoCloseable {
     /** 启动时自动创建或打开本机加密存储，不需要用户密码。 */
     public synchronized void open() throws IOException, VaultException {
         if (isUnlocked()) return;
-        if (!Files.isRegularFile(paths.vaultKeyFile())) {
+        Optional<char[]> stored = secretStore.read();
+        if (stored.isEmpty()) {
             if (exists()) backupLegacyVault();
             createLocalStore();
             return;
         }
 
-        char[] localSecret = readLocalSecret();
+        char[] localSecret = stored.get();
         try {
             if (exists()) unlockWithSecret(localSecret);
             else createWithSecret(localSecret);
@@ -87,7 +91,7 @@ public final class VaultService implements AutoCloseable {
         char[] localSecret = encode(randomSecret).toCharArray();
         Arrays.fill(randomSecret, (byte) 0);
         try {
-            writeLocalSecret(localSecret);
+            secretStore.write(localSecret);
             createWithSecret(localSecret);
         } finally {
             Arrays.fill(localSecret, '\0');
@@ -239,7 +243,7 @@ public final class VaultService implements AutoCloseable {
     public synchronized void resetLocalData() throws IOException, VaultException {
         lock();
         Files.deleteIfExists(paths.vaultFile());
-        Files.deleteIfExists(paths.vaultKeyFile());
+        secretStore.delete();
         createLocalStore();
     }
 
@@ -329,42 +333,6 @@ public final class VaultService implements AutoCloseable {
 
     private static byte[] decode(String encoded) {
         return Base64.getDecoder().decode(encoded);
-    }
-
-    private char[] readLocalSecret() throws IOException, VaultException {
-        String encoded = Files.readString(paths.vaultKeyFile(), StandardCharsets.UTF_8).strip();
-        byte[] decoded;
-        try {
-            decoded = decode(encoded);
-        } catch (IllegalArgumentException exception) {
-            throw new VaultException("本地加密存储密钥损坏", exception);
-        }
-        try {
-            if (decoded.length != 32) throw new VaultException("本地加密存储密钥长度无效");
-            return encoded.toCharArray();
-        } finally {
-            Arrays.fill(decoded, (byte) 0);
-        }
-    }
-
-    private void writeLocalSecret(char[] localSecret) throws IOException {
-        Path keyFile = paths.vaultKeyFile();
-        Path temporary = Files.createTempFile(paths.root(), "vault-key-", ".tmp");
-        try {
-            Files.writeString(temporary, new String(localSecret) + System.lineSeparator(), StandardCharsets.UTF_8);
-            try {
-                Files.setPosixFilePermissions(temporary, PosixFilePermissions.fromString("rw-------"));
-            } catch (UnsupportedOperationException ignored) {
-                // 当前平台不支持 POSIX 权限时使用默认文件权限。
-            }
-            try {
-                Files.move(temporary, keyFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, keyFile, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
     }
 
     private void backupLegacyVault() throws IOException {

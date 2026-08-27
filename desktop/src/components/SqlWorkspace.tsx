@@ -44,7 +44,10 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
   const [busy, setBusy] = useState(false);
   const [autoCommit, setAutoCommitState] = useState(true);
   const [pendingTransaction, setPendingTransaction] = useState(false);
-  const maxRows = 100;
+  const [maxRows, setMaxRows] = useState(() => {
+    const saved = Number(localStorage.getItem("dm-connect.sql-max-rows"));
+    return saved === 1000 || saved === 5000 ? saved : 100;
+  });
   const [editorHeight, setEditorHeight] = useState(() => Number(localStorage.getItem("dm-connect.sql-editor-height")) || 390);
   const [resizingResults, setResizingResults] = useState(false);
   const [message, setMessage] = useState("SQL 会话已就绪");
@@ -100,6 +103,9 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
   useEffect(() => {
     localStorage.setItem("dm-connect.sql-editor-height", String(editorHeight));
   }, [editorHeight]);
+  useEffect(() => {
+    localStorage.setItem("dm-connect.sql-max-rows", String(maxRows));
+  }, [maxRows]);
   useEffect(() => {
     if (!resizingResults) return;
     const resize = (event: PointerEvent) => {
@@ -345,7 +351,15 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
           <button className="button toolbar-button" disabled={autoCommit || !pendingTransaction} onClick={() => transaction(true)}><CheckCheck size={14} />提交</button>
           <button className="button toolbar-button" disabled={autoCommit || !pendingTransaction} onClick={() => transaction(false)}><RotateCcw size={14} />回滚</button>
         </div>
-        <span className="row-limit fixed"><span>结果上限</span><strong>100 行</strong></span>
+        <label className="row-limit">
+          <span>结果上限</span>
+          <select value={maxRows} onChange={event => setMaxRows(Number(event.target.value))} aria-label="查询结果行数上限">
+            <option value={100}>100 行</option>
+            <option value={1000}>1000 行</option>
+            <option value={5000}>5000 行</option>
+          </select>
+          <ChevronDown size={12} />
+        </label>
       </header>
 
       <div className="sql-editor-pane">
@@ -412,7 +426,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
         confirmText="仍然执行"
         onCancel={() => setDangerous(null)}
         onConfirm={() => { const current = dangerous; setDangerous(null); void execute(current.mode, true); }}
-        message={<><p>检测到 DROP 或 TRUNCATE 语句，执行后可能无法恢复：</p><div className="dangerous-list">{dangerous.statements.slice(0, 5).map((statement, index) => <code key={index}>{statement.replace(/\s+/g, " ").slice(0, 180)}</code>)}</div></>}
+        message={<><p>检测到可能造成数据丢失或权限变更的语句（如 DROP、TRUNCATE、无 WHERE 的 DELETE/UPDATE、ALTER、GRANT）。执行后可能无法恢复：</p><div className="dangerous-list">{dangerous.statements.slice(0, 5).map((statement, index) => <code key={index}>{statement.replace(/\s+/g, " ").slice(0, 180)}</code>)}</div></>}
       />}
       {confirmAutoCommit && <ConfirmModal title="启用自动提交" message="启用自动提交会提交当前事务。确认继续吗？" confirmText="提交并启用" onCancel={() => setConfirmAutoCommit(false)} onConfirm={() => { setConfirmAutoCommit(false); void applyAutoCommit(true); }} />}
     </section>

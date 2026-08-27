@@ -6,7 +6,7 @@
 
     <groupId>com.dmconnect</groupId>
     <artifactId>dm-connect</artifactId>
-    <version>2.0.6</version>
+    <version>2.0.11</version>
     <name>数据库连接工具</name>
     <description>支持多种关系型与原生数据库的轻量桌面连接与查询工具</description>
 
@@ -20,7 +20,6 @@
         <mysql.connector.version>8.3.0</mysql.connector.version>
         <mongodb.driver.version>5.2.1</mongodb.driver.version>
         <lettuce.version>6.5.4.RELEASE</lettuce.version>
-        <fst.version>2.48</fst.version>
         <postgresql.version>42.7.5</postgresql.version>
         <sqlserver.version>12.8.1.jre11</sqlserver.version>
         <sqlite.version>3.47.1.0</sqlite.version>
@@ -67,11 +66,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
             <version>${lettuce.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>de.ruedigermoeller</groupId>
-            <artifactId>fst</artifactId>
-            <version>${fst.version}</version>
         </dependency>
         <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>${postgresql.version}</version></dependency>
         <dependency><groupId>com.microsoft.sqlserver</groupId><artifactId>mssql-jdbc</artifactId><version>${sqlserver.version}</version></dependency>
@@ -121,19 +115,11 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.dmconnect.DmConnectLauncher</mainClass>
+                            <mainClass>com.dmconnect.backend.BackendLauncher</mainClass>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>lib/</classpathPrefix>
                         </manifest>
                     </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.openjfx</groupId>
-                <artifactId>javafx-maven-plugin</artifactId>
-                <version>0.0.8</version>
-                <configuration>
-                    <mainClass>com.dmconnect.DmConnectLauncher</mainClass>
                 </configuration>
             </plugin>
             <plugin>
@@ -151,4 +137,54 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>javafx-mac-aarch64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>mac-aarch64</javafx.platform>
+            </properties>
+        </profile>
+        <profile>
+            <id>javafx-mac-x64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>mac</javafx.platform>
+            </properties>
+        </profile>
+        <profile>
+            <id>javafx-windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>win</javafx.platform>
+            </properties>
+        </profile>
+        <profile>
+            <id>javafx-linux</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>linux</javafx.platform>
+            </properties>
+        </profile>
+    </profiles>
 </project>

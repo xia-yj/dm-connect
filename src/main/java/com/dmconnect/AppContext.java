@@ -10,6 +10,7 @@ import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.persistence.AppPaths;
 import com.dmconnect.persistence.JsonStore;
 import com.dmconnect.persistence.ProfileRepository;
+import com.dmconnect.security.LocalSecretStores;
 import com.dmconnect.security.VaultService;
 import com.dmconnect.security.VaultException;
 
@@ -36,7 +37,7 @@ public final class AppContext implements AutoCloseable {
         paths.initialize();
         jsonStore = new JsonStore();
         profiles = new ProfileRepository(paths, jsonStore);
-        vault = new VaultService(paths, jsonStore);
+        vault = new VaultService(paths, jsonStore, LocalSecretStores.forApp(paths));
         vault.open();
         drivers = new DriverManagerService(paths, jsonStore);
         Map<String, DatabaseAdapter> adapters = new LinkedHashMap<>();

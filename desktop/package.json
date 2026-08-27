@@ -1,6 +1,6 @@
 {
   "name": "dm-connect-desktop",
-  "version": "2.0.9",
+  "version": "2.0.11",
   "private": true,
   "description": "DM and MySQL desktop database client built with React and Electron",
   "main": "dist-electron/main.js",

@@ -20,10 +20,11 @@ Java 17 后端（JDBC / 元数据 / SQL / 事务 / 本地加密存储 / CSV）
 - 关系型数据库连接卡片支持独立展开/收起库列表，多个连接可以同时展开；MongoDB 与 Redis 的库和对象在原生工作台中浏览。
 - 懒加载关系型数据库的模式、表、视图、过程、函数、序列和触发器（按数据库实际能力显示结果）。
 - 双击表名默认展示最多 100 行数据预览，同时可查看列、约束、索引和 DDL。
+- SQL 工作台结果上限可选 100 / 1000 / 5000 行；整表 CSV / INSERT 导出不受该上限限制。
 - 按数据库类型创建和修改表，提供 DM / MySQL 对应的字段类型、DDL 与安全校验。
 - Monaco SQL 多标签工作台，每个标签拥有独立 JDBC 会话、事务状态和方言提示。
 - 执行选中内容、当前语句或整个脚本，可取消执行，支持多结果集。
-- `DROP` / `TRUNCATE` 二次确认，未提交标签关闭确认。
+- `DROP` / `TRUNCATE` / `ALTER` / `GRANT` / `REVOKE`、无 `WHERE` 的 `DELETE`/`UPDATE` 会二次确认，未提交标签关闭确认。
 - SQL 标签页支持右键保存当前脚本到本地文件夹、双击或右键重命名，保存时使用自定义标签名生成 `.sql` 文件。
 - 应用自动管理本机密钥，使用 Argon2id + AES-256-GCM 保存密码和最近 1000 条 SQL 历史。
 - 支持结果/整表 CSV 导出与表数据 INSERT SQL 导出。
@@ -68,11 +69,11 @@ MySQL Connector/J 8.3 已随应用后端内置；达梦驱动仍需按服务器�
 ├── profiles.json       # 不含密码的连接信息
 ├── drivers.json        # 驱动摘要、版本和 SHA-256
 ├── drivers/            # 导入的 JDBC JAR 副本
-├── vault.key           # 应用自动生成的本机密钥（仅当前用户可读写）
-└── vault.json          # AES-256-GCM 加密的密码与 SQL 历史
+├── vault.json          # AES-256-GCM 加密的密码与 SQL 历史
+└── vault.key           # 仅在系统保险箱不可用时回退保存本机密钥
 ```
 
-从使用主密码的旧版升级时，应用无法在不询问主密码的情况下解密旧数据，因此会将旧文件保留为 `vault.master-password-backup.json`，然后创建新的本机加密存储。连接配置会保留，已保存的数据库密码需要重新输入。
+macOS 会把本机密钥写入钥匙串（服务名 `com.dmconnect.vault`），Windows 使用当前用户 DPAPI（`vault.key.dpapi`）。从旧版升级时，若仍存在 `vault.key`，应用会在成功写入系统保险箱后删除该明文文件。从使用主密码的旧版升级时，应用无法在不询问主密码的情况下解密旧数据，因此会将旧文件保留为 `vault.master-password-backup.json`，然后创建新的本机加密存储。连接配置会保留，已保存的数据库密码需要重新输入。
 
 ## SQL 脚本规则
 
@@ -131,7 +132,7 @@ npm run build
 https://github.com/xia-yj/dm-connect/releases/latest/download/update.json
 ```
 
-也可以在应用“设置 → 应用更新”中改成其他地址。GitHub Actions 在推送 `v*` tag 时会自动同步桌面端版本、构建 Windows/macOS 安装包，并生成更新清单和 GitHub Release。应用下载包含完整 `.app` 的 ZIP，退出后由临时脚本替换旧应用并重新启动，因此首次仍应手动安装 DMG。
+更新清单和安装包地址必须是 HTTPS 的 GitHub Releases。清单需包含对应架构的 SHA-256，客户端下载后校验通过才会替换 `.app`。GitHub Actions 在推送 `v*` tag 时会自动同步桌面端版本、构建 Windows/macOS 安装包，并生成带哈希的更新清单和 GitHub Release。应用下载包含完整 `.app` 的 ZIP，退出后由临时脚本替换旧应用并重新启动，因此首次仍应手动安装 DMG。
 
 ## 当前边界
 

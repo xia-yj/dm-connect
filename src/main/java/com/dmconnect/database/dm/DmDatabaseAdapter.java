@@ -1,5 +1,6 @@
 package com.dmconnect.database.dm;
 
+import com.dmconnect.connection.ConnectTimeouts;
 import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.database.spi.DdlProvider;
 import com.dmconnect.database.spi.MetadataProvider;
@@ -33,6 +34,11 @@ public final class DmDatabaseAdapter implements DatabaseAdapter {
     @Override
     public String driverClassName() {
         return DRIVER_CLASS;
+    }
+
+    @Override
+    public Map<String, String> defaultAdvancedProperties() {
+        return Map.of("connectTimeout", String.valueOf(ConnectTimeouts.MILLIS));
     }
 
     @Override

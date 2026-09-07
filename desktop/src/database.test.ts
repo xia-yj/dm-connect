@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionSummary, databaseTypeLabel, driverDatabaseType, isJdbcDatabase, isNativeDatabase, jdbcUrlPreview, supportsTableDesigner } from "./database";
+import { connectionSummary, databaseTypeLabel, DATABASE_INFO, driverDatabaseType, isJdbcDatabase, isNativeDatabase, jdbcUrlPreview, supportsTableDesigner } from "./database";
 import type { DatabaseType, DriverDescriptor } from "./types";
 
 function driver(driverClass: string, databaseType?: DatabaseType): DriverDescriptor {
@@ -34,6 +34,12 @@ describe("database helpers", () => {
     expect(databaseTypeLabel("dm")).toBe("DM");
     expect(databaseTypeLabel("mysql")).toBe("MySQL");
     expect(databaseTypeLabel("postgresql")).toBe("PostgreSQL");
+  });
+
+  it("does not suggest forcing TLS in Dameng placeholders and trusts private SQL Server certificates by default", () => {
+    expect(DATABASE_INFO.dm.advancedPlaceholder).not.toMatch(/ssl\s*=\s*true/i);
+    expect(DATABASE_INFO.sqlserver.advancedPlaceholder).toContain("trustServerCertificate=true");
+    expect(DATABASE_INFO.mysql.advancedPlaceholder).toContain("connectTimeout=30000");
   });
 
   it("separates native clients from JDBC databases", () => {

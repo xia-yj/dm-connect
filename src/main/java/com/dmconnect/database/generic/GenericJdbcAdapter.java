@@ -1,5 +1,6 @@
 package com.dmconnect.database.generic;
 
+import com.dmconnect.connection.ConnectTimeouts;
 import com.dmconnect.database.spi.DatabaseAdapter;
 import com.dmconnect.database.spi.DdlProvider;
 import com.dmconnect.database.spi.MetadataProvider;
@@ -71,6 +72,21 @@ public final class GenericJdbcAdapter implements DatabaseAdapter {
             }
             case SQLSERVER -> sqlServerUrl(safeHost, port, safeDatabase);
             case SQLITE -> throw new IllegalStateException();
+        };
+    }
+
+    @Override
+    public Map<String, String> defaultAdvancedProperties() {
+        return switch (flavor) {
+            case POSTGRESQL -> Map.of(
+                    "connectTimeout", String.valueOf(ConnectTimeouts.SECONDS),
+                    "tcpKeepAlive", "true");
+            case ORACLE -> Map.of("oracle.net.CONNECT_TIMEOUT", String.valueOf(ConnectTimeouts.MILLIS));
+            case SQLSERVER -> Map.of(
+                    "loginTimeout", String.valueOf(ConnectTimeouts.SECONDS),
+                    "encrypt", "true",
+                    "trustServerCertificate", "true");
+            case SQLITE -> Map.of();
         };
     }
 

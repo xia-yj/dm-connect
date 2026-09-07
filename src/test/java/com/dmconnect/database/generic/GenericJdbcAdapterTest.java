@@ -23,6 +23,17 @@ class GenericJdbcAdapterTest {
         assertThat(sqlserver.buildJdbcUrl("db.local", 1433, "app", Map.of("encrypt", "true"))).isEqualTo("jdbc:sqlserver://db.local:1433;databaseName=app");
         assertThat(postgres.connectionProperties(Map.of("sslmode", "prefer"))).containsEntry("sslmode", "prefer");
         assertThat(sqlserver.connectionProperties(Map.of("encrypt", "true"))).containsEntry("encrypt", "true");
+        assertThat(postgres.defaultAdvancedProperties())
+                .containsEntry("connectTimeout", "30")
+                .containsEntry("tcpKeepAlive", "true");
+        assertThat(sqlserver.defaultAdvancedProperties())
+                .containsEntry("encrypt", "true")
+                .containsEntry("trustServerCertificate", "true")
+                .containsEntry("loginTimeout", "30");
+        assertThat(com.dmconnect.database.spi.DatabaseAdapter.mergeAdvancedProperties(
+                sqlserver.defaultAdvancedProperties(), Map.of("trustServerCertificate", "false")))
+                .containsEntry("trustServerCertificate", "false")
+                .containsEntry("encrypt", "true");
         assertThat(sqlite.buildJdbcUrl("localhost", 1, "/tmp/app.db", Map.of())).isEqualTo("jdbc:sqlite:/tmp/app.db");
         assertThat(sqlserver.quoteIdentifier("a]b")).isEqualTo("[a]]b]");
         assertThatThrownBy(() -> sqlite.buildJdbcUrl("localhost", 1, "", Map.of())).isInstanceOf(IllegalArgumentException.class);

@@ -1,5 +1,6 @@
 package com.dmconnect.database.dm;
 
+import com.dmconnect.database.spi.DatabaseAdapter;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -32,5 +33,16 @@ class DmDatabaseAdapterTest {
     void rejectsInvalidPort() {
         assertThatThrownBy(() -> adapter.buildJdbcUrl("localhost", 0, Map.of()))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void suppliesAConnectTimeoutDefaultWithoutEnablingSsl() {
+        assertThat(adapter.defaultAdvancedProperties())
+                .containsEntry("connectTimeout", "30000")
+                .doesNotContainKey("ssl");
+        assertThat(DatabaseAdapter.mergeAdvancedProperties(
+                adapter.defaultAdvancedProperties(), Map.of("ConnectTimeout", "5000")))
+                .containsEntry("ConnectTimeout", "5000")
+                .doesNotContainKey("connectTimeout");
     }
 }

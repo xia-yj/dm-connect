@@ -300,8 +300,9 @@ public final class BackendService implements AutoCloseable {
         char[] password = passwordFor(profile, params.path("password").asText(""));
         BackendWorkspace workspace = new BackendWorkspace(context, profile, password);
         Arrays.fill(password, '\0');
-        try (Connection connection = workspace.openConnection()) {
-            List<String> schemas = adapter(workspace).metadataProvider().listSchemas(connection);
+        try {
+            List<String> schemas = workspace.withSharedConnection(connection ->
+                    adapter(workspace).metadataProvider().listSchemas(connection));
             workspaces.put(profileId, workspace);
             return Map.of("profile", profileView(profile), "schemas", schemas);
         } catch (Exception exception) {
@@ -334,9 +335,8 @@ public final class BackendService implements AutoCloseable {
         if (nativeWorkspace instanceof MongoWorkspace mongo) return mongo.databases();
         if (nativeWorkspace instanceof RedisWorkspace redis) return List.of("db" + redis.selectedDatabase());
         BackendWorkspace workspace = requiredWorkspace(profileId);
-        try (Connection connection = workspace.openConnection()) {
-            return adapter(workspace).metadataProvider().listSchemas(connection);
-        }
+        return workspace.withSharedConnection(connection ->
+                adapter(workspace).metadataProvider().listSchemas(connection));
     }
 
     private Object connectNative(String profileId, ConnectionProfile profile, String suppliedPassword) throws Exception {
@@ -528,9 +528,8 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
         String schema = requiredText(params, "schema");
         DatabaseObjectKind kind = DatabaseObjectKind.valueOf(requiredText(params, "kind"));
-        try (Connection connection = workspace.openConnection()) {
-            return adapter(workspace).metadataProvider().listObjects(connection, schema, kind);
-        }
+        return workspace.withSharedConnection(connection ->
+                adapter(workspace).metadataProvider().listObjects(connection, schema, kind));
     }
 
     private Object createTable(JsonNode params) throws Exception {
@@ -550,10 +549,13 @@ public final class BackendService implements AutoCloseable {
             sql = ddl.create(definition);
             comments = ddl.createComments(definition);
         }
-        try (Connection connection = workspace.openConnection(); var statement = connection.createStatement()) {
-            statement.execute(sql);
-            for (String comment : comments) statement.execute(comment);
-        }
+        workspace.withSharedConnection(connection -> {
+            try (var statement = connection.createStatement()) {
+                statement.execute(sql);
+                for (String comment : comments) statement.execute(comment);
+            }
+            return null;
+        });
         return Map.of("created", true, "sql", sql);
     }
 
@@ -567,9 +569,12 @@ public final class BackendService implements AutoCloseable {
         List<String> statements = adapter.id().equals("mysql")
                 ? new MySqlTableDdlBuilder(adapter).alter(original, target)
                 : new DmTableDdlBuilder(adapter).alter(original, target);
-        try (Connection connection = workspace.openConnection(); var statement = connection.createStatement()) {
-            for (String sql : statements) statement.execute(sql);
-        }
+        workspace.withSharedConnection(connection -> {
+            try (var statement = connection.createStatement()) {
+                for (String sql : statements) statement.execute(sql);
+            }
+            return null;
+        });
         return Map.of("altered", true, "statements", statements);
     }
 
@@ -577,11 +582,11 @@ public final class BackendService implements AutoCloseable {
         DatabaseObject table = tableObject(params);
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
         if (!adapter(workspace).id().equals("dm")) return Map.of("enabled", false, "supported", false);
-        try (Connection connection = workspace.openConnection()) {
+        return workspace.withSharedConnection(connection -> {
             DatabaseAdapter adapter = adapter(workspace);
             String ddl = adapter.ddlProvider().getDdl(connection, table);
             return Map.of("enabled", ddl != null && ddl.toUpperCase(java.util.Locale.ROOT).matches("(?s).*\\bUSING\\s+LONG\\s+ROW\\b.*"), "supported", true);
-        }
+        });
     }
 
     private Object setLongRow(JsonNode params) throws Exception {
@@ -591,9 +596,12 @@ public final class BackendService implements AutoCloseable {
         DatabaseAdapter adapter = adapter(workspace);
         if (!adapter.id().equals("dm")) throw new RpcException("UNSUPPORTED_OPERATION", "超长记录设置仅适用于达梦数据库");
         String source = adapter.quoteIdentifier(table.schema()) + "." + adapter.quoteIdentifier(table.name());
-        try (Connection connection = workspace.openConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("ALTER TABLE " + source + (enabled ? " ENABLE USING LONG ROW" : " DISABLE USING LONG ROW"));
-        }
+        workspace.withSharedConnection(connection -> {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE " + source + (enabled ? " ENABLE USING LONG ROW" : " DISABLE USING LONG ROW"));
+            }
+            return null;
+        });
         return Map.of("enabled", enabled);
     }
 
@@ -633,13 +641,13 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
         DatabaseObject object = new DatabaseObject(requiredText(params, "schema"), requiredText(params, "name"),
                 DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
-        TableDetails details = null;
-        TablePreview preview = null;
-        String ddl = null;
-        String detailsError = "";
-        String previewError = "";
-        String ddlError = "";
-        try (Connection connection = workspace.openConnection()) {
+        return workspace.withSharedConnection(connection -> {
+            TableDetails details = null;
+            TablePreview preview = null;
+            String ddl = null;
+            String detailsError = "";
+            String previewError = "";
+            String ddlError = "";
             if (object.kind() == DatabaseObjectKind.TABLE) {
                 try {
                     details = adapter(workspace).metadataProvider().describeTable(connection, object);
@@ -657,16 +665,16 @@ public final class BackendService implements AutoCloseable {
             } catch (Exception exception) {
                 ddlError = "读取 DDL 失败：" + rootMessage(exception) + "。当前用户可能没有该对象的元数据权限。";
             }
-        }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("object", object);
-        result.put("details", details);
-        result.put("detailsError", detailsError);
-        result.put("preview", preview == null ? null : previewView(preview, 1, 100));
-        result.put("previewError", previewError);
-        result.put("ddl", ddl);
-        result.put("ddlError", ddlError);
-        return result;
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("object", object);
+            result.put("details", details);
+            result.put("detailsError", detailsError);
+            result.put("preview", preview == null ? null : previewView(preview, 1, 100));
+            result.put("previewError", previewError);
+            result.put("ddl", ddl);
+            result.put("ddlError", ddlError);
+            return result;
+        });
     }
 
     private Object loadPreview(JsonNode params) throws Exception {
@@ -679,7 +687,7 @@ public final class BackendService implements AutoCloseable {
         int pageSize = Math.max(1, Math.min(500, params.path("pageSize").asInt(100)));
         int page = Math.max(1, Math.min(1_000_000, params.path("page").asInt(1)));
         PreviewFilter filter = previewFilter(params);
-        try (Connection connection = workspace.openConnection()) {
+        return workspace.withSharedConnection(connection -> {
             TablePreview preview = adapter(workspace).metadataProvider()
                     .previewTable(connection, object, (page - 1) * pageSize, pageSize, filter);
             long lastPage = Math.max(1, (preview.totalRows() + pageSize - 1) / pageSize);
@@ -689,7 +697,7 @@ public final class BackendService implements AutoCloseable {
                         .previewTable(connection, object, (safePage - 1) * pageSize, pageSize, filter);
             }
             return previewView(preview, safePage, pageSize);
-        }
+        });
     }
 
     private Object openTable(JsonNode params) throws Exception {
@@ -826,10 +834,9 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
         DatabaseObject object = new DatabaseObject(requiredText(params, "schema"), requiredText(params, "name"),
                 DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
-        try (Connection connection = workspace.openConnection()) {
-            return Map.of("updated", updateObjectCell(connection, adapter(workspace), object, requiredText(params, "column"),
-                    params.get("value"), params.path("keyValues")));
-        }
+        return workspace.withSharedConnection(connection -> Map.of("updated",
+                updateObjectCell(connection, adapter(workspace), object, requiredText(params, "column"),
+                        params.get("value"), params.path("keyValues"))));
     }
 
     private Object updateObjectCells(JsonNode params) throws Exception {
@@ -838,7 +845,7 @@ public final class BackendService implements AutoCloseable {
                 DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
         JsonNode changes = params.path("changes");
         if (!changes.isArray() || changes.isEmpty()) throw new RpcException("INVALID_REQUEST", "没有要保存的修改");
-        try (Connection connection = workspace.openConnection()) {
+        return workspace.withSharedConnection(connection -> {
             boolean autoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
@@ -853,9 +860,9 @@ public final class BackendService implements AutoCloseable {
                 connection.rollback();
                 throw exception;
             } finally {
-                connection.setAutoCommit(autoCommit);
+                connection.setAutoCommit(true);
             }
-        }
+        });
     }
 
     private Object deleteObjectRow(JsonNode params) throws Exception {
@@ -867,9 +874,9 @@ public final class BackendService implements AutoCloseable {
         if (!keyValues.isObject() && rowValues.isObject()) keyValues = rowValues;
         if (!keyValues.isObject()) throw new RpcException("INVALID_REQUEST", "缺少用于定位记录的主键值");
         if (object.kind() != DatabaseObjectKind.TABLE) throw new RpcException("INVALID_OBJECT", "只有数据表支持删除数据");
-        try (Connection connection = workspace.openConnection()) {
-            return Map.of("deleted", deleteObjectRow(connection, adapter(workspace), object, keyValues));
-        }
+        JsonNode keys = keyValues;
+        return workspace.withSharedConnection(connection ->
+                Map.of("deleted", deleteObjectRow(connection, adapter(workspace), object, keys)));
     }
 
     private int deleteObjectRow(Connection connection, DatabaseAdapter databaseAdapter, DatabaseObject object, JsonNode keyValues) throws Exception {

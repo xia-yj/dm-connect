@@ -12,20 +12,20 @@ export const DATABASE_INFO: Record<DatabaseType, {
     shortLabel: "DM",
     defaultPort: 5236,
     driverHint: "请导入与服务器版本匹配的达梦 JDBC 驱动（DmJdbcDriver*.jar）",
-    advancedPlaceholder: "socketTimeout=30000\nssl=true"
+    advancedPlaceholder: "connectTimeout=30000\nsocketTimeout=30000"
   },
   mysql: {
     label: "MySQL",
     shortLabel: "MySQL",
     defaultPort: 3306,
     driverHint: "已内置 MySQL Connector/J 8.3；如需切换版本，可继续导入其他 Connector/J JAR",
-    advancedPlaceholder: "sslMode=PREFERRED\nconnectTimeout=10000\nsocketTimeout=30000"
+    advancedPlaceholder: "sslMode=PREFERRED\nconnectTimeout=30000\nsocketTimeout=30000"
   },
-  mongo: { label: "MongoDB", shortLabel: "MongoDB", defaultPort: 27017, driverHint: "应用内置 MongoDB 原生客户端", advancedPlaceholder: "authSource=admin\ntls=false\nsocketTimeoutMS=30000" },
-  redis: { label: "Redis", shortLabel: "Redis", defaultPort: 6379, driverHint: "应用内置 Redis 原生客户端", advancedPlaceholder: "database=0\ntls=false\ncommandTimeoutMS=10000" },
-  postgresql: { label: "PostgreSQL", shortLabel: "PostgreSQL", defaultPort: 5432, driverHint: "已内置 PostgreSQL JDBC 驱动", advancedPlaceholder: "sslmode=prefer" },
-  oracle: { label: "Oracle", shortLabel: "Oracle", defaultPort: 1521, driverHint: "请导入与服务器和 Java 版本匹配的 ojdbc JAR", advancedPlaceholder: "oracle.net.CONNECT_TIMEOUT=10000" },
-  sqlserver: { label: "SQL Server", shortLabel: "SQL Server", defaultPort: 1433, driverHint: "已内置 Microsoft SQL Server JDBC 驱动", advancedPlaceholder: "encrypt=true\ntrustServerCertificate=false" },
+  mongo: { label: "MongoDB", shortLabel: "MongoDB", defaultPort: 27017, driverHint: "应用内置 MongoDB 原生客户端", advancedPlaceholder: "authSource=admin\ntls=false\nconnectTimeoutMS=30000" },
+  redis: { label: "Redis", shortLabel: "Redis", defaultPort: 6379, driverHint: "应用内置 Redis 原生客户端", advancedPlaceholder: "database=0\ntls=false\nconnectTimeoutMS=30000" },
+  postgresql: { label: "PostgreSQL", shortLabel: "PostgreSQL", defaultPort: 5432, driverHint: "已内置 PostgreSQL JDBC 驱动", advancedPlaceholder: "sslmode=prefer\nconnectTimeout=30" },
+  oracle: { label: "Oracle", shortLabel: "Oracle", defaultPort: 1521, driverHint: "请导入与服务器和 Java 版本匹配的 ojdbc JAR", advancedPlaceholder: "oracle.net.CONNECT_TIMEOUT=30000" },
+  sqlserver: { label: "SQL Server", shortLabel: "SQL Server", defaultPort: 1433, driverHint: "已内置 Microsoft SQL Server JDBC 驱动", advancedPlaceholder: "encrypt=true\ntrustServerCertificate=true\nloginTimeout=30" },
   sqlite: { label: "SQLite", shortLabel: "SQLite", defaultPort: 1, driverHint: "已内置 SQLite JDBC 驱动", advancedPlaceholder: "" }
 };
 

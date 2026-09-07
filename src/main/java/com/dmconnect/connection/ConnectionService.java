@@ -20,7 +20,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ConnectionService implements AutoCloseable {
-    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
+    public static final Duration DEFAULT_TIMEOUT = ConnectTimeouts.CONNECT;
     private final Map<String, DatabaseAdapter> adapters;
     private final DriverManagerService drivers;
     private final ExecutorService connectorExecutor;
@@ -88,9 +88,11 @@ public final class ConnectionService implements AutoCloseable {
             throw new IllegalArgumentException("所选 JDBC 驱动不适用于" + adapter.displayName());
         }
         Driver driver = drivers.driver(profile.driverId());
-        String url = adapter.buildJdbcUrl(profile.host(), profile.port(), profile.database(), profile.advancedProperties());
+        Map<String, String> advanced = DatabaseAdapter.mergeAdvancedProperties(
+                adapter.defaultAdvancedProperties(), profile.advancedProperties());
+        String url = adapter.buildJdbcUrl(profile.host(), profile.port(), profile.database(), advanced);
         Properties properties = new Properties();
-        adapter.connectionProperties(profile.advancedProperties()).forEach(properties::setProperty);
+        adapter.connectionProperties(advanced).forEach(properties::setProperty);
         if (!profile.username().isBlank()) properties.setProperty("user", profile.username());
         if (password.length > 0) properties.setProperty("password", new String(password));
         try {

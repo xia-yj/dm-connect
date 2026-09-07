@@ -19,6 +19,9 @@ class MySqlDatabaseAdapterTest {
         assertThat(adapter.driverClassName()).isEqualTo("com.mysql.cj.jdbc.Driver");
         assertThat(adapter.metadataCatalog("app_db")).isEqualTo("app_db");
         assertThat(adapter.metadataSchema("app_db")).isNull();
+        assertThat(adapter.defaultAdvancedProperties())
+                .containsEntry("connectTimeout", "30000")
+                .containsEntry("tcpKeepAlive", "true");
     }
 
     @Test

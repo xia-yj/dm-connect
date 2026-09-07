@@ -1,5 +1,6 @@
 package com.dmconnect.nativeclient;
 
+import com.dmconnect.connection.ConnectTimeouts;
 import com.dmconnect.model.ConnectionProfile;
 import com.mongodb.AuthenticationMechanism;
 import com.mongodb.MongoClientSettings;
@@ -102,7 +103,8 @@ public final class MongoWorkspace implements NativeWorkspace {
 
         MongoClientSettings.Builder settings = MongoClientSettings.builder();
         String host = normalizedHost(profile.host());
-        int serverSelectionTimeout = integerProperty(properties, "serverSelectionTimeoutMS", 1, 600_000).orElse(10_000);
+        int serverSelectionTimeout = integerProperty(properties, "serverSelectionTimeoutMS", 1, 600_000)
+                .orElse(ConnectTimeouts.MILLIS);
         Optional<String> replicaSet = property(properties, "replicaSet");
         boolean directConnection = booleanProperty(properties, "directConnection", false);
         settings.applyToClusterSettings(cluster -> {
@@ -112,7 +114,8 @@ public final class MongoWorkspace implements NativeWorkspace {
             if (directConnection) cluster.mode(ClusterConnectionMode.SINGLE);
         });
 
-        int connectTimeout = integerProperty(properties, "connectTimeoutMS", 1, 600_000).orElse(10_000);
+        int connectTimeout = integerProperty(properties, "connectTimeoutMS", 1, 600_000)
+                .orElse(ConnectTimeouts.MILLIS);
         int socketTimeout = integerProperty(properties, "socketTimeoutMS", 1, 3_600_000).orElse(30_000);
         settings.applyToSocketSettings(socket -> {
             socket.connectTimeout(connectTimeout, TimeUnit.MILLISECONDS);

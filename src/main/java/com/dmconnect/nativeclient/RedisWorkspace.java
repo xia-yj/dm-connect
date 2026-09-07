@@ -1,5 +1,6 @@
 package com.dmconnect.nativeclient;
 
+import com.dmconnect.connection.ConnectTimeouts;
 import com.dmconnect.model.ConnectionProfile;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.KeyScanCursor;
@@ -30,7 +31,8 @@ public final class RedisWorkspace implements NativeWorkspace {
         RedisURI uri = uriFor(profile, password);
         selectedDatabase = uri.getDatabase();
         RedisClient openedClient = RedisClient.create(uri);
-        int connectTimeout = integerProperty(profile.advancedProperties(), "connectTimeoutMS", 1, 600_000).orElse(10_000);
+        int connectTimeout = integerProperty(profile.advancedProperties(), "connectTimeoutMS", 1, 600_000)
+                .orElse(ConnectTimeouts.MILLIS);
         openedClient.setOptions(ClientOptions.builder()
                 .socketOptions(SocketOptions.builder().connectTimeout(Duration.ofMillis(connectTimeout)).build())
                 .build());

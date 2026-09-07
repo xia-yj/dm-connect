@@ -83,6 +83,8 @@ class MongoWorkspaceTest {
 
         MongoClientSettings defaults = MongoWorkspace.settingsFor(profile("", "db", Map.of()), new char[0]);
         assertThat(defaults.getSocketSettings().getReadTimeout(TimeUnit.MILLISECONDS)).isEqualTo(30_000);
+        assertThat(defaults.getSocketSettings().getConnectTimeout(TimeUnit.MILLISECONDS)).isEqualTo(30_000);
+        assertThat(defaults.getClusterSettings().getServerSelectionTimeout(TimeUnit.MILLISECONDS)).isEqualTo(30_000);
     }
 
     @Test

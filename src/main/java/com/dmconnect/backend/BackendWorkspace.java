@@ -1,6 +1,7 @@
 package com.dmconnect.backend;
 
 import com.dmconnect.AppContext;
+import com.dmconnect.connection.ManagedJdbcConnection;
 import com.dmconnect.model.ConnectionProfile;
 import com.dmconnect.query.QuerySession;
 
@@ -15,7 +16,14 @@ final class BackendWorkspace implements AutoCloseable {
     private final ConnectionProfile profile;
     private final char[] password;
     private final Set<QuerySession> sessions = ConcurrentHashMap.newKeySet();
+    private final Object metadataLock = new Object();
+    private ManagedJdbcConnection metadataConnection;
     private volatile boolean closed;
+
+    @FunctionalInterface
+    interface SharedJdbcAction<T> {
+        T apply(Connection connection) throws Exception;
+    }
 
     BackendWorkspace(AppContext context, ConnectionProfile profile, char[] password) {
         this.context = context;
@@ -34,6 +42,16 @@ final class BackendWorkspace implements AutoCloseable {
             return context.connections().connect(profile, copy);
         } finally {
             Arrays.fill(copy, '\0');
+        }
+    }
+
+    /**
+     * Reuses one auto-commit JDBC connection for object browsing and short metadata writes.
+     * SQL tabs and table editors still call {@link #openConnection()} for isolated sessions.
+     */
+    <T> T withSharedConnection(SharedJdbcAction<T> action) throws Exception {
+        synchronized (metadataLock) {
+            return action.apply(ensureSharedConnection());
         }
     }
 
@@ -59,6 +77,25 @@ final class BackendWorkspace implements AutoCloseable {
             }
         });
         sessions.clear();
+        synchronized (metadataLock) {
+            if (metadataConnection != null) {
+                metadataConnection.closeQuietly();
+                metadataConnection = null;
+            }
+        }
         Arrays.fill(password, '\0');
+    }
+
+    private Connection ensureSharedConnection() throws SQLException {
+        if (closed) throw new SQLException("连接已断开");
+        if (metadataConnection == null) {
+            metadataConnection = new ManagedJdbcConnection(openConnection(), this::openConnection);
+        }
+        return metadataConnection.ensureOpen(
+                closed,
+                false,
+                true,
+                "连接已断开",
+                "数据库会话连接已失效");
     }
 }

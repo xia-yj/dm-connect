@@ -37,7 +37,8 @@ export class JavaBridge {
     if (!existsSync(javaExecutable) || !existsSync(appJar)) {
       throw new Error(`Java 后端资源不存在：${backendRoot}`);
     }
-    const javaOptions = ["-Dfile.encoding=UTF-8"];
+    // macOS 的 JVM 会自动继承系统 SOCKS 代理，且不识别 CIDR 形式的例外地址，内网数据库连接会被送进代理软件。
+    const javaOptions = ["-Dfile.encoding=UTF-8", "-DsocksProxyHost="];
     if (process.env.DMCONNECT_DATA_DIR) {
       javaOptions.push(`-Ddmconnect.dataDir=${process.env.DMCONNECT_DATA_DIR}`);
     }

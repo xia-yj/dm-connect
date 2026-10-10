@@ -7,15 +7,18 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  size?: "default" | "wide" | "xl";
   onClose?: () => void;
 }
 
-export function Modal({ title, description, children, footer, wide, onClose }: ModalProps) {
+export function Modal({ title, description, children, footer, wide, size, onClose }: ModalProps) {
+  const resolved = size ?? (wide ? "wide" : "default");
+  const sizeClass = resolved === "xl" ? " modal-xl" : resolved === "wide" ? " modal-wide" : "";
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event => {
       if (event.currentTarget === event.target) onClose?.();
     }}>
-      <section className={`modal-card${wide ? " modal-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+      <section className={`modal-card${sizeClass}`} role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-header">
           <div>
             <h2>{title}</h2>

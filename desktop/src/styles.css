@@ -442,6 +442,7 @@ details summary::-webkit-details-marker { display: none; }
 .modal-card { width: min(460px, calc(100vw - 50px)); max-height: calc(100vh - 70px); border: 1px solid rgba(255,255,255,.7); border-radius: 17px; display: flex; flex-direction: column; background: #f9fbfd; box-shadow: var(--shadow); animation: modal-in .18s ease-out; overflow: hidden; }
 @keyframes modal-in { from { transform: translateY(8px) scale(.985); opacity: .6; } }
 .modal-wide { width: min(820px, calc(100vw - 70px)); }
+.modal-xl { width: min(1180px, calc(100vw - 48px)); }
 .modal-header { min-height: 72px; padding: 17px 19px 14px; display: flex; align-items: flex-start; justify-content: space-between; background: white; border-bottom: 1px solid #e4e9f0; }
 .modal-header h2 { margin: 0; color: #1e2a3e; font-size: 16px; letter-spacing: -.02em; }.modal-header p { margin: 5px 0 0; color: #7e8b9e; font-size: 9px; }
 .modal-body { min-height: 0; padding: 18px 19px; overflow: auto; }
@@ -459,7 +460,10 @@ details summary::-webkit-details-marker { display: none; }
 /* DM table designer */
 .table-designer { display: flex; flex-direction: column; gap: 14px; }.table-designer > .field-label { max-width: 360px; }
 .table-columns-section { min-width: 0; padding: 14px; border: 1px solid #dce5ef; border-radius: 11px; background: #fff; overflow: hidden; }.table-columns-section > header { min-width: 0; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }.table-columns-section header > div { display: flex; flex-direction: column; gap: 3px; }.table-columns-section header strong { color: #37455a; font-size: 13px; }.table-columns-section header small { color: #8694a8; font-size: 11px; }
-.table-columns-grid { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(100px, 1.08fr) minmax(90px, .66fr) minmax(68px, .38fr) minmax(58px, .32fr) minmax(105px, .8fr) minmax(125px, .9fr) minmax(105px, .8fr) 34px 34px 34px 88px; gap: 6px; align-items: center; padding: 5px 0; border-top: 1px solid #edf1f5; }.table-columns-heading { padding-top: 0; border-top: 0; color: #718096; font-size: 11px; font-weight: 700; white-space: nowrap; }.table-columns-grid .field-input { width: 100%; min-width: 0; min-height: 35px; padding: 7px 8px; font-size: 12px; }.table-columns-grid input[type="checkbox"] { width: 16px; height: 16px; margin: auto; accent-color: var(--blue); }.table-column-actions { min-width: 0; display: flex; align-items: center; gap: 2px; }.table-column-actions .icon-button { flex: 1; width: auto; min-width: 0; height: 31px; padding: 0; }.table-designer-warning { margin: 0; padding: 10px 12px; border: 1px solid #f0d9a5; border-radius: 8px; color: #8a6111; background: #fffaf0; font-size: 12px; line-height: 1.5; }
+.table-columns-scroll { min-width: 0; overflow-x: auto; }
+.table-columns-grid { width: max-content; min-width: 100%; display: grid; grid-template-columns: minmax(110px, 1.1fr) minmax(110px, .7fr) 76px 68px minmax(110px, .8fr) minmax(110px, .8fr) 36px 36px 36px 120px; gap: 6px; align-items: center; padding: 5px 0; border-top: 1px solid #edf1f5; }
+.table-columns-grid.has-on-update { grid-template-columns: minmax(110px, 1.1fr) minmax(110px, .7fr) 76px 68px minmax(110px, .8fr) minmax(125px, .85fr) minmax(110px, .8fr) 36px 36px 36px 120px; }
+.table-columns-heading { padding-top: 0; border-top: 0; color: #718096; font-size: 11px; font-weight: 700; white-space: nowrap; }.table-columns-grid .field-input { width: 100%; min-width: 0; min-height: 35px; padding: 7px 8px; font-size: 12px; }.table-columns-grid input[type="checkbox"] { width: 16px; height: 16px; margin: auto; accent-color: var(--blue); }.table-column-actions { width: 120px; min-width: 120px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; }.table-column-actions .icon-button { flex: 0 0 36px; width: 36px; min-width: 36px; height: 32px; padding: 0; }.table-designer-warning { margin: 0; padding: 10px 12px; border: 1px solid #f0d9a5; border-radius: 8px; color: #8a6111; background: #fffaf0; font-size: 12px; line-height: 1.5; }
 
 /* History */
 .history-layout { height: 480px; display: grid; grid-template-columns: 300px 1fr; gap: 10px; }
@@ -640,6 +644,7 @@ body { font-size: 15px; }
 /* Dialogs and history */
 .modal-card { border-radius: 19px; }
 .modal-wide { width: min(900px, calc(100vw - 70px)); }
+.modal-xl { width: min(1180px, calc(100vw - 48px)); }
 .modal-header { min-height: 82px; padding: 20px 22px 16px; }
 .modal-header h2 { font-size: 20px; }
 .modal-header p { font-size: 12px; }

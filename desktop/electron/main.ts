@@ -6,6 +6,7 @@ import { join, normalize, resolve } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
+import { fetchWithNodeFallback, isHttp2ProtocolError } from "./github-fetch";
 import { JavaBridge, BridgeError } from "./java-bridge";
 import { parseUpdateManifest, requireAllowedHttpsUrl, timingSafeEqualHex, type AvailableUpdate } from "./update-security";
 
@@ -36,15 +37,15 @@ function sendUpdateStatus(status: string): void {
   mainWindow?.webContents.send("update:status", status);
 }
 
-async function checkForUpdate(manifestUrlText: string): Promise<AvailableUpdate | null> {
-  const manifestUrl = requireAllowedHttpsUrl(manifestUrlText, "更新清单地址");
-  const response = await net.fetch(manifestUrl.toString());
-  if (!response.ok) throw new Error(`读取更新清单失败（HTTP ${response.status}）`);
-  return parseUpdateManifest(await response.text(), app.getVersion(), process.arch);
+async function githubFetch(url: string, onFallback?: () => void): Promise<Response> {
+  return fetchWithNodeFallback(url, input => net.fetch(input), input => globalThis.fetch(input), onFallback);
 }
 
-function isHttp2ProtocolError(cause: unknown): boolean {
-  return String(cause).includes("ERR_HTTP2_PROTOCOL_ERROR");
+async function checkForUpdate(manifestUrlText: string): Promise<AvailableUpdate | null> {
+  const manifestUrl = requireAllowedHttpsUrl(manifestUrlText, "更新清单地址");
+  const response = await githubFetch(manifestUrl.toString());
+  if (!response.ok) throw new Error(`读取更新清单失败（HTTP ${response.status}）`);
+  return parseUpdateManifest(await response.text(), app.getVersion(), process.arch);
 }
 
 async function writeUpdateArchive(response: Response, archive: string, expectedSha256: string): Promise<void> {
@@ -67,13 +68,12 @@ async function writeUpdateArchive(response: Response, archive: string, expectedS
 }
 
 async function downloadUpdateArchive(url: string, archive: string, expectedSha256: string): Promise<void> {
+  const switchToCompatibleDownload = () => sendUpdateStatus("下载连接异常，正在切换兼容下载方式…");
   try {
-    await writeUpdateArchive(await net.fetch(url), archive, expectedSha256);
+    await writeUpdateArchive(await githubFetch(url, switchToCompatibleDownload), archive, expectedSha256);
   } catch (cause) {
     if (!isHttp2ProtocolError(cause)) throw cause;
-    // GitHub 的大文件下载偶发触发 Chromium 网络栈的 HTTP/2 协议错误。
-    // Node fetch 使用独立的 HTTP 客户端，作为兼容回退通道继续下载。
-    sendUpdateStatus("下载连接异常，正在切换兼容下载方式…");
+    switchToCompatibleDownload();
     await fs.rm(archive, { force: true });
     await writeUpdateArchive(await globalThis.fetch(url), archive, expectedSha256);
   }

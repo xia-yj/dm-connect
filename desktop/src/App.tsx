@@ -574,7 +574,7 @@ export default function App() {
             <span className={`context-icon${selectedProfile?.connected ? " online" : ""}`}><Database size={17} /></span>
             <div><span className="connection-name"><strong>{selectedProfile?.name ?? "数据库连接工作台"}</strong>{selectedProfile && <em className={`database-type-badge ${selectedProfile.databaseType}`}>{databaseTypeLabel(selectedProfile.databaseType)}</em>}</span><small>{selectedProfile ? connectionSummary(selectedProfile) : "选择或创建数据库连接"}</small></div>
           </div>
-          <span className="app-status">{status}</span>
+          <span className="app-status" title={status}>{status}</span>
           <div className="workspace-actions">
             {selectedProfile && !selectedProfile.connected && <button className="button primary compact" onClick={() => connect(selectedProfile)}>连接</button>}
             {selectedProfile?.connected && <button className="button secondary compact" onClick={() => disconnect(selectedProfile)}><Unplug size={14} />断开</button>}

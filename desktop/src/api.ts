@@ -9,5 +9,7 @@ export function asRpcError(cause: unknown): RpcError {
 }
 
 export function errorMessage(cause: unknown): string {
-  return asRpcError(cause).message || "操作失败";
+  const raw = asRpcError(cause).message || "操作失败";
+  const invoke = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?(.*)$/s);
+  return invoke?.[1]?.trim() || raw;
 }

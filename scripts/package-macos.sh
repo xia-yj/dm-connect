@@ -47,7 +47,16 @@ rm -f "$DMG_PATH"
 trap 'rm -rf "$DMG_STAGE"' EXIT
 ditto "$APP_PATH" "$DMG_STAGE/数据库连接工具.app"
 ln -s /Applications "$DMG_STAGE/Applications"
-hdiutil create -volname "数据库连接工具" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
+# GitHub macOS runner 上 hdiutil 偶发 "Resource busy"（系统仍在扫描刚复制的 .app），重试几次即可。
+for attempt in 1 2 3 4 5; do
+  if hdiutil create -volname "数据库连接工具" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null; then break; fi
+  if [[ "$attempt" -eq 5 ]]; then
+    echo "DMG 生成失败：hdiutil 连续 5 次失败" >&2
+    exit 1
+  fi
+  echo "hdiutil create 失败，$((attempt * 10)) 秒后重试（第 $attempt 次）" >&2
+  sleep $((attempt * 10))
+done
 codesign --force --sign - "$DMG_PATH"
 codesign --verify --verbose=2 "$DMG_PATH"
 hdiutil verify "$DMG_PATH" >/dev/null

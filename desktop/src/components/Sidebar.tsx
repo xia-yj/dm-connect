@@ -5,7 +5,6 @@ import {
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 import type { ConnectionProfile, DatabaseObject, DatabaseObjectKind, DatabaseType } from "../types";
 import { connectionSummary, databaseTypeLabel, isNativeDatabase, supportsTableDesigner } from "../database";
-import { Brand } from "./Brand";
 
 export const OBJECT_KINDS: { kind: DatabaseObjectKind; label: string; icon: typeof Table2 }[] = [
   { kind: "TABLE", label: "表", icon: Table2 },
@@ -57,6 +56,7 @@ export function Sidebar(props: SidebarProps) {
   const [filter, setFilter] = useState("");
   const [hiddenSchemas, setHiddenSchemas] = useState<Record<string, string[]>>(readHiddenSchemas);
   const active = props.profiles.find(profile => profile.id === props.selectedProfileId) ?? null;
+  const onlineCount = props.profiles.filter(profile => profile.connected).length;
   const needle = filter.trim().toLowerCase();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; profileId: string; databaseType: DatabaseType; schema: string; profile?: ConnectionProfile; object?: DatabaseObject; longRowEnabled?: boolean; loadingLongRow?: boolean; longRowStatusError?: boolean } | null>(null);
   const [expandedProfiles, setExpandedProfiles] = useState<Set<string>>(new Set());
@@ -141,16 +141,10 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside className="sidebar" style={{ width: props.width, minWidth: props.width, maxWidth: props.width }}>
       <div className="sidebar-drag" aria-label="窗口拖拽区域">
-        <Brand compact />
+        <button className="icon-button" onClick={props.onNewConnection} aria-label="新建连接" title="新建连接"><Plus size={17} /></button>
       </div>
-      <div className="sidebar-heading">
-        <div className="sidebar-heading-copy">
-          <span>数据库资源</span>
-          <small><i />{props.profiles.filter(item => item.connected).length} 个连接在线</small>
-        </div>
-        <button className="icon-button sidebar-add" onClick={props.onNewConnection} aria-label="新建连接" title="新建连接"><Plus size={17} /></button>
-      </div>
-      <label className="sidebar-search"><Search size={15} /><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选表名、连接或对象" /></label>
+      <label className="sidebar-search"><Search size={14} /><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选表名、连接或对象" /></label>
+      <div className="sidebar-heading"><span>连接</span><em>{props.profiles.length}</em></div>
 
       <div className="sidebar-tree" onWheel={scrollTree}>
         {props.profiles.length === 0 && <div className="sidebar-empty"><Database size={27} /><strong>还没有数据库连接</strong><span>创建连接后从这里浏览对象</span><button className="button sidebar-primary" onClick={props.onNewConnection}><Plus size={15} />新建连接</button></div>}
@@ -257,7 +251,8 @@ export function Sidebar(props: SidebarProps) {
       </div>}
 
       <footer className="sidebar-footer">
-        {active && <div className="active-connection"><span className={`connection-dot${active.connected ? " online" : ""}`} title={active.connected ? "已连接" : "未连接"} aria-label={active.connected ? "已连接" : "未连接"} /><span>{active.name}</span><em className={`database-type-badge ${active.databaseType}`}>{databaseTypeLabel(active.databaseType)}</em><small>{active.connected ? "已连接" : "未连接"}</small></div>}
+        <span className={`connection-dot${onlineCount > 0 ? " online" : ""}`} />
+        <span>{props.profiles.length} 个连接 · {onlineCount} 个在线</span>
       </footer>
     </aside>
   );

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol } from "electron";
 import { createWriteStream, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize, resolve } from "node:path";
@@ -251,10 +251,10 @@ async function createWindow(): Promise<void> {
     minWidth: 1180,
     minHeight: 760,
     show: false,
-    backgroundColor: "#0b1020",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1c1e" : "#ffffff",
     title: "数据库连接工具",
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 18, y: 18 },
+    trafficLightPosition: { x: 18, y: 19 },
     webPreferences: {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,

@@ -10,7 +10,7 @@ import { sqlDialectConfig } from "../sqlDialect";
 import type { DatabaseObject, DatabaseType, ExecutionResult, ObjectLoadResult, QueryStatus, StatementOutcome } from "../types";
 import { DataGrid } from "./DataGrid";
 import { ConfirmModal } from "./Modal";
-import "../monaco";
+import { useMonacoTheme } from "../monaco";
 
 interface SqlWorkspaceProps {
   sessionId: string;
@@ -29,6 +29,7 @@ type ColumnSuggestion = { schema: string; table: string; name: string; typeName:
 
 export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, schemas, tableSuggestions, initialSql = "", onSqlChange, onHistoryChanged }: SqlWorkspaceProps) {
   const dialect = sqlDialectConfig(databaseType);
+  const monacoTheme = useMonacoTheme();
   const workspaceRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const completionRef = useRef<{ dispose: () => void } | null>(null);
@@ -367,7 +368,7 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
         <Editor
           height="100%"
           language="sql"
-          theme="dm-connect-light"
+          theme={monacoTheme}
           value={sql}
           onChange={value => {
             const nextSql = value ?? "";
@@ -379,9 +380,9 @@ export function SqlWorkspace({ sessionId, profileName, profileId, databaseType, 
             automaticLayout: true,
             minimap: { enabled: false },
             fontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-            fontSize: 15,
-            lineHeight: 24,
-            padding: { top: 18, bottom: 18 },
+            fontSize: 14,
+            lineHeight: 22,
+            padding: { top: 12, bottom: 12 },
             scrollBeyondLastLine: false,
             smoothScrolling: true,
             cursorSmoothCaretAnimation: "on",

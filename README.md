@@ -70,10 +70,10 @@ MySQL Connector/J 8.3 已随应用后端内置；达梦驱动仍需按服务器�
 ├── drivers.json        # 驱动摘要、版本和 SHA-256
 ├── drivers/            # 导入的 JDBC JAR 副本
 ├── vault.json          # AES-256-GCM 加密的密码与 SQL 历史
-└── vault.key           # 仅在系统保险箱不可用时回退保存本机密钥
+└── vault.key           # 本机密钥（macOS / Linux；Windows 不可用 DPAPI 时回退）
 ```
 
-macOS 会把本机密钥写入钥匙串（服务名 `com.dmconnect.vault`），Windows 使用当前用户 DPAPI（`vault.key.dpapi`）。从旧版升级时，若仍存在 `vault.key`，应用会在成功写入系统保险箱后删除该明文文件。从使用主密码的旧版升级时，应用无法在不询问主密码的情况下解密旧数据，因此会将旧文件保留为 `vault.master-password-backup.json`，然后创建新的本机加密存储。连接配置会保留，已保存的数据库密码需要重新输入。
+macOS 和 Linux 把本机密钥保存在 `vault.key`（权限 600），Windows 使用当前用户 DPAPI（`vault.key.dpapi`）。2.0.22–2.0.25 曾在 macOS 上把密钥写入钥匙串（服务名 `com.dmconnect.vault`）；升级后若 `vault.key` 不存在，应用会把钥匙串中的密钥写回 `vault.key` 并删除该钥匙串条目，`vault.key` 已存在时不会读取或改动钥匙串。从使用主密码的旧版升级时，应用无法在不询问主密码的情况下解密旧数据，因此会将旧文件保留为 `vault.master-password-backup.json`，然后创建新的本机加密存储。连接配置会保留，已保存的数据库密码需要重新输入。
 
 ## SQL 脚本规则
 

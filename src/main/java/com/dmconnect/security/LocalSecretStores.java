@@ -13,7 +13,7 @@ public final class LocalSecretStores {
         if (System.getProperty(AppPaths.DATA_DIR_PROPERTY) != null) return fileStore;
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("mac")) {
-            return new MigratingSecretStore(fileStore, new MacKeychainSecretStore());
+            return new LegacyKeychainSecretStore(fileStore, new MacKeychainSecretStore());
         }
         if (os.contains("win")) {
             return new MigratingSecretStore(fileStore, new WindowsDpapiSecretStore(paths.root().resolve("vault.key.dpapi")));

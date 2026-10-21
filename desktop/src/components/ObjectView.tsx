@@ -25,10 +25,19 @@ function displayColumnType(column: ColumnInfo) {
   return `${column.typeName}${column.size > 0 ? `(${column.size}${column.scale > 0 ? `,${column.scale}` : ""})` : ""}`;
 }
 
+const nonComparableTypes = /^(?:BINARY|VARBINARY|LONGVARBINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB|CLOB|NCLOB|BFILE|IMAGE|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|LONGVARCHAR|LONG|JSON|GEOMETRY|POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)$/;
+
 function previewColumnEditable(column: ColumnInfo | undefined): boolean {
   if (!column || column.autoIncrement) return false;
   if (column.safelyEditable === false && /生成列|不可见列/.test(column.editWarning ?? "")) return false;
-  return !/^(?:BINARY|VARBINARY|LONGVARBINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB|CLOB|NCLOB|BFILE|IMAGE|TEXT|TINYTEXT|MEDIUMTEXT|LONGTEXT|LONGVARCHAR|LONG|JSON|GEOMETRY|POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)$/.test(column.typeName.toUpperCase());
+  return !nonComparableTypes.test(column.typeName.toUpperCase());
+}
+
+/** Whether a column's preview value can be compared with `=` to find a row in a table without a primary key. */
+function rowMatchColumn(column: ColumnInfo | undefined): boolean {
+  if (!column) return false;
+  const type = column.typeName.toUpperCase();
+  return !nonComparableTypes.test(type) && !/^(?:FLOAT|REAL|DOUBLE|BINARY_FLOAT|BINARY_DOUBLE|DATE|TIME|TIMESTAMP|DATETIME|SMALLDATETIME|INTERVAL|YEAR)/.test(type);
 }
 
 function filterColumnSuggestions(input: string, columns: { name: string }[]): { name: string }[] {
@@ -211,15 +220,32 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
   function keySignature(keyValues: Record<string, unknown>) {
     return JSON.stringify(keyValues);
   }
+  const uniqueKeyColumns = [
+    ...(result.details?.constraints.filter(item => item.type.trim().toUpperCase() === "UNIQUE").map(item => item.columns) ?? []),
+    ...(result.details?.indexes.filter(item => item.unique).map(item => item.columns) ?? [])
+  ].filter(columns => columns.length > 0);
+  function previewColumnIndex(name: string) {
+    return preview?.columns.findIndex(item => item.name.toLowerCase() === name.toLowerCase() || item.label.toLowerCase() === name.toLowerCase()) ?? -1;
+  }
   function keyValuesForRow(rowIndex: number): Record<string, unknown> {
-    if (!preview || primaryKeyColumns.length === 0) throw new Error("该表没有主键，无法安全地删除或编辑数据");
+    if (!preview) throw new Error("未找到要操作的数据行");
     const row = preview.rows[rowIndex];
     if (!row) throw new Error("未找到要操作的数据行");
-    return Object.fromEntries(primaryKeyColumns.map(key => {
-      const keyIndex = preview.columns.findIndex(item => item.name.toLowerCase() === key.toLowerCase() || item.label.toLowerCase() === key.toLowerCase());
-      if (keyIndex < 0 || row[keyIndex] == null) throw new Error(`当前预览未包含有效主键列：${key}`);
-      return [key, row[keyIndex]];
-    }));
+    if (primaryKeyColumns.length > 0) {
+      return Object.fromEntries(primaryKeyColumns.map(key => {
+        const keyIndex = previewColumnIndex(key);
+        if (keyIndex < 0 || row[keyIndex] == null) throw new Error(`当前预览未包含有效主键列：${key}`);
+        return [key, row[keyIndex]];
+      }));
+    }
+    // Without a primary key the row is found by the values it had before any local edit: a non-null unique key
+    // if there is one, otherwise every comparable column. The backend rejects the change unless exactly one row matches.
+    const original = row.map((cell, columnIndex) => { const edit = pendingEdits[`${rowIndex}:${columnIndex}`]; return edit ? edit.originalValue : cell; });
+    const unique = uniqueKeyColumns.find(columns => columns.every(name => { const index = previewColumnIndex(name); return index >= 0 && original[index] != null; }));
+    const columns = unique ?? preview.columns.map(column => column.name)
+      .filter(name => rowMatchColumn(result.details?.columns.find(item => item.name.toLowerCase() === name.toLowerCase())));
+    if (columns.length === 0) throw new Error("该表没有主键，也没有可用于定位记录的列，请使用 SQL 工作台修改");
+    return Object.fromEntries(columns.map(name => [name, original[previewColumnIndex(name)]]));
   }
   function toggleRowSelection(rowIndex: number, additive: boolean) {
     setSelectedRows(current => {
@@ -233,7 +259,7 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
   function canDeleteRows(rowIndexes: Iterable<number>) {
     if (!preview) return false;
     const indexes = [...new Set(rowIndexes)];
-    return indexes.length > 0 && primaryKeyColumns.length > 0;
+    return indexes.length > 0;
   }
   function updateCell(rowIndex: number, columnIndex: number, column: string, value: string | null) {
     if (pendingDeleteRows.has(rowIndex)) return;
@@ -257,10 +283,12 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
       recordChanges(next);
       return;
     }
-    if (!preview || primaryKeyColumns.length === 0) throw new Error("该表没有主键，无法安全地直接编辑数据");
+    if (!preview) return;
     const row = preview.rows[rowIndex];
     if (!row) return;
-    const keyValues = keyValuesForRow(rowIndex);
+    let keyValues: Record<string, unknown>;
+    try { keyValues = keyValuesForRow(rowIndex); }
+    catch (cause) { setSaveError(cause instanceof Error ? cause.message : "无法定位要修改的记录"); return; }
     const key = `${rowIndex}:${columnIndex}`;
     const original = pendingEdits[key]?.keyValues ?? keyValues;
     const originalValue = pendingEdits[key]?.originalValue ?? row[columnIndex];
@@ -329,11 +357,18 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
       const deletingKeys = new Set(pendingChanges
         .filter((change): change is Extract<PendingTableChange, { type: "DELETE" }> => change.type === "DELETE")
         .map(change => keySignature(change.keyValues)));
+      // Updates run one after another, so a later edit of the same row must match the values earlier ones wrote.
+      const rowLocators = new Map<number, Record<string, unknown>>();
       const changes: PendingTableChange[] = [
         ...pendingChanges.filter(change => change.type !== "UPDATE"),
         ...pendingList
           .filter(edit => !deletingKeys.has(keySignature(edit.keyValues)))
-          .map(({ column, value, keyValues }) => ({ type: "UPDATE" as const, column, value, keyValues }))
+          .map(({ rowIndex, column, value, keyValues }) => {
+            const locator = rowLocators.get(rowIndex) ?? keyValues;
+            const matchedColumn = Object.keys(locator).find(key => key.toLowerCase() === column.toLowerCase());
+            if (matchedColumn) rowLocators.set(rowIndex, { ...locator, [matchedColumn]: value });
+            return { type: "UPDATE" as const, column, value, keyValues: locator };
+          })
       ];
       const nextStatus = await onSaveChanges(changes);
       if (nextStatus) { setSessionStatus(nextStatus); onTableSessionStatus?.(nextStatus); }
@@ -490,7 +525,12 @@ export function ObjectView({ result, onLoadPreview, onSaveChanges, onDeleteRow, 
       <button className="apply-preview-filter" onClick={() => void applyFilter()} disabled={previewLoading}>筛选</button>
     </div>
     {previewError && <div className="preview-error">{previewError}</div>}
-    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} draftRows={draftRows.map(row => row.values)} rowOffset={(preview.page - 1) * preview.pageSize} selectedRows={selectedRows} pendingDeleteRows={pendingDeleteRows} onToggleRow={toggleRowSelection} onColumnFilter={column => void filterColumn(column.name)} filteredColumns={filteredColumns} onEditCell={primaryKeyColumns.length > 0 ? (rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value) : undefined} onDeleteRow={rowIndex => markRowsForDeletion(selectedRows.has(rowIndex) ? selectedRows : [rowIndex])} canDeleteRow={() => primaryKeyColumns.length > 0} deleteRowLabel={rowIndex => pendingDeleteRows.has(rowIndex) ? "取消删除标记" : "标记删除（保存后生效）"} isColumnEditable={column => !primaryKeyColumns.some(key => key.toLowerCase() === column.name.toLowerCase() || key.toLowerCase() === column.label.toLowerCase()) && previewColumnEditable(result.details?.columns.find(item => item.name.toLowerCase() === column.name.toLowerCase() || item.name.toLowerCase() === column.label.toLowerCase()))} editedCellKeys={new Set(Object.keys(pendingEdits))} />
+    <DataGrid table={{ ...previewWithRemarks!, truncated: false }} draftRows={draftRows.map(row => row.values)} rowOffset={(preview.page - 1) * preview.pageSize} selectedRows={selectedRows} pendingDeleteRows={pendingDeleteRows} onToggleRow={toggleRowSelection} onColumnFilter={column => void filterColumn(column.name)} filteredColumns={filteredColumns} onEditCell={(rowIndex, column, value) => updateCell(rowIndex, preview.columns.findIndex(item => item.name === column.name || item.label === column.label), column.name, value)} onDeleteRow={rowIndex => markRowsForDeletion(selectedRows.has(rowIndex) ? selectedRows : [rowIndex])} canDeleteRow={rowIndex => canDeleteRows([rowIndex])} deleteRowLabel={rowIndex => rowIndex >= preview.rows.length ? "移除新增行" : pendingDeleteRows.has(rowIndex) ? "取消删除标记" : "标记删除（保存后生效）"} isColumnEditable={(column, rowIndex) => {
+      const columnEditable = previewColumnEditable(result.details?.columns.find(item => item.name.toLowerCase() === column.name.toLowerCase() || item.name.toLowerCase() === column.label.toLowerCase()));
+      // New rows are inserted, so they may fill key columns themselves.
+      if (rowIndex >= preview.rows.length) return columnEditable;
+      return !primaryKeyColumns.some(key => key.toLowerCase() === column.name.toLowerCase() || key.toLowerCase() === column.label.toLowerCase()) && columnEditable;
+    }} editedCellKeys={new Set(Object.keys(pendingEdits))} />
     {saveError && <div className="grid-edit-error">{saveError}</div>}
     <div className="preview-pagination">
       <span>共 {preview.totalRows} 条 · 每页 {preview.pageSize} 条</span>

@@ -536,6 +536,7 @@ select.field-input { padding-right: 6px; }
 .data-grid .row-number { position: sticky; left: 0; z-index: 1; width: 48px; min-width: 48px; color: var(--text-4); background: var(--bg-subtle) !important; font: 11px var(--font-sans); text-align: right; font-variant-numeric: tabular-nums; }
 .data-grid thead .row-number { z-index: 3; color: var(--text-3); }
 .data-grid td.selected-cell { position: relative; z-index: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+.data-grid td:focus { outline: none; }
 .null-value { color: var(--text-4); font-style: italic; font-size: 11.5px; }
 .data-grid td.editable-cell { cursor: text; }
 .data-grid td.edited-cell { position: relative; background: var(--warning-soft) !important; }

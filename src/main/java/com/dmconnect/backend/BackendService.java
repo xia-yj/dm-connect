@@ -834,9 +834,9 @@ public final class BackendService implements AutoCloseable {
         BackendWorkspace workspace = requiredWorkspace(requiredText(params, "profileId"));
         DatabaseObject object = new DatabaseObject(requiredText(params, "schema"), requiredText(params, "name"),
                 DatabaseObjectKind.valueOf(requiredText(params, "kind")), params.path("remarks").asText(""));
-        return workspace.withSharedConnection(connection -> Map.of("updated",
+        return workspace.withSharedConnection(connection -> Map.of("updated", inTransaction(connection, () ->
                 updateObjectCell(connection, adapter(workspace), object, requiredText(params, "column"),
-                        params.get("value"), params.path("keyValues"))));
+                        params.get("value"), params.path("keyValues")))));
     }
 
     private Object updateObjectCells(JsonNode params) throws Exception {
@@ -876,31 +876,99 @@ public final class BackendService implements AutoCloseable {
         if (object.kind() != DatabaseObjectKind.TABLE) throw new RpcException("INVALID_OBJECT", "只有数据表支持删除数据");
         JsonNode keys = keyValues;
         return workspace.withSharedConnection(connection ->
-                Map.of("deleted", deleteObjectRow(connection, adapter(workspace), object, keys)));
+                Map.of("deleted", inTransaction(connection, () -> deleteObjectRow(connection, adapter(workspace), object, keys))));
+    }
+
+    private interface SqlWork<T> { T run() throws Exception; }
+
+    private static <T> T inTransaction(Connection connection, SqlWork<T> work) throws Exception {
+        boolean autoCommit = connection.getAutoCommit();
+        if (autoCommit) connection.setAutoCommit(false);
+        try {
+            T result = work.run();
+            if (autoCommit) connection.commit();
+            return result;
+        } catch (Exception exception) {
+            if (autoCommit) connection.rollback();
+            throw exception;
+        } finally {
+            if (autoCommit) connection.setAutoCommit(true);
+        }
     }
 
     private int deleteObjectRow(Connection connection, DatabaseAdapter databaseAdapter, DatabaseObject object, JsonNode keyValues) throws Exception {
-        DatabaseMetaData metadata = connection.getMetaData();
+        if (!keyValues.isObject()) throw new RpcException("INVALID_REQUEST", "缺少用于定位记录的主键值");
+        RowLocator locator = rowLocator(connection.getMetaData(), databaseAdapter, object, keyValues);
+        String source = qualifiedTableName(databaseAdapter, object);
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + source + " WHERE " + locatorWhere(databaseAdapter, locator))) {
+            bindLocator(statement, 1, locator);
+            int deleted = statement.executeUpdate();
+            if (deleted != 1) throw new RpcException("DELETE_CONFLICT", rowCountConflict("删除", deleted, locator));
+            return deleted;
+        }
+    }
+
+    /** Columns and original values that identify one row: the primary key, or the values the client matched on when the table has none. */
+    private record RowLocator(List<String> columns, List<JsonNode> values, boolean primaryKey) { }
+
+    private RowLocator rowLocator(DatabaseMetaData metadata, DatabaseAdapter adapter, DatabaseObject object, JsonNode keyValues) throws Exception {
         List<String> primaryKeys = new ArrayList<>();
-        try (var rs = metadata.getPrimaryKeys(databaseAdapter.metadataCatalog(object.schema()), databaseAdapter.metadataSchema(object.schema()), object.name())) {
+        try (var rs = metadata.getPrimaryKeys(adapter.metadataCatalog(object.schema()), adapter.metadataSchema(object.schema()), object.name())) {
             while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
         }
-        if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地删除数据");
-        String source = qualifiedTableName(databaseAdapter, object);
-        String where = primaryKeys.stream().map(key -> databaseAdapter.quoteIdentifier(key) + " = ?")
-                .collect(java.util.stream.Collectors.joining(" AND "));
-        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + source + " WHERE " + where)) {
-            for (int index = 0; index < primaryKeys.size(); index++) {
-                String key = primaryKeys.get(index);
+        List<JsonNode> values = new ArrayList<>();
+        if (!primaryKeys.isEmpty()) {
+            for (String key : primaryKeys) {
                 JsonNode keyValue = keyValues.get(key);
                 if (keyValue == null) keyValue = keyValues.properties().stream().filter(entry -> entry.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue).findFirst().orElse(null);
                 if (keyValue == null || keyValue.isNull()) throw new RpcException("INVALID_REQUEST", "缺少主键列“" + key + "”的值");
-                bindJsonValue(statement, index + 1, keyValue);
+                values.add(keyValue);
             }
-            int deleted = statement.executeUpdate();
-            if (deleted != 1) throw new RpcException("DELETE_CONFLICT", "未能精确删除一条记录，数据可能已被其他操作修改");
-            return deleted;
+            return new RowLocator(primaryKeys, values, true);
         }
+        Map<String, String> actualNames = new LinkedHashMap<>();
+        Map<String, Integer> types = new LinkedHashMap<>();
+        try (var rs = metadata.getColumns(adapter.metadataCatalog(object.schema()), adapter.metadataSchema(object.schema()), object.name(), "%")) {
+            while (rs.next()) {
+                String name = rs.getString("COLUMN_NAME");
+                if (name == null) continue;
+                String key = name.toUpperCase(java.util.Locale.ROOT);
+                actualNames.put(key, name);
+                types.put(key, rs.getInt("DATA_TYPE"));
+            }
+        }
+        List<String> columns = new ArrayList<>();
+        for (Map.Entry<String, JsonNode> entry : keyValues.properties()) {
+            String key = entry.getKey().toUpperCase(java.util.Locale.ROOT);
+            String actual = actualNames.get(key);
+            if (actual == null) throw new RpcException("INVALID_COLUMN", "找不到用于定位记录的列：" + entry.getKey());
+            if (!directlyEditableJdbcType(types.get(key))) throw new RpcException("INVALID_REQUEST", "大对象、二进制或复杂类型的列不能用于定位记录：" + actual);
+            columns.add(actual);
+            values.add(entry.getValue());
+        }
+        if (columns.isEmpty()) throw new RpcException("INVALID_REQUEST", "该表没有主键，缺少用于定位记录的列值");
+        return new RowLocator(columns, values, false);
+    }
+
+    private static String locatorWhere(DatabaseAdapter adapter, RowLocator locator) {
+        List<String> conditions = new ArrayList<>();
+        for (int index = 0; index < locator.columns().size(); index++) {
+            JsonNode value = locator.values().get(index);
+            conditions.add(adapter.quoteIdentifier(locator.columns().get(index)) + (value == null || value.isNull() ? " IS NULL" : " = ?"));
+        }
+        return String.join(" AND ", conditions);
+    }
+
+    private void bindLocator(PreparedStatement statement, int firstIndex, RowLocator locator) throws Exception {
+        int index = firstIndex;
+        for (JsonNode value : locator.values()) {
+            if (value != null && !value.isNull()) bindJsonValue(statement, index++, value);
+        }
+    }
+
+    private static String rowCountConflict(String action, int affected, RowLocator locator) {
+        if (affected > 1 && !locator.primaryKey()) return "该表没有主键，有 " + affected + " 行数据完全相同，无法只" + action + "其中一行，已取消本次保存";
+        return "未能精确" + action + "一条记录，数据可能已被其他操作修改";
     }
 
     private int insertObjectRow(Connection connection, DatabaseAdapter databaseAdapter, DatabaseObject object, JsonNode change) throws Exception {
@@ -998,36 +1066,18 @@ public final class BackendService implements AutoCloseable {
         if (!directlyEditableJdbcType(columnType)) {
             throw new RpcException("READ_ONLY_COLUMN", "大对象、二进制或复杂类型不能在数据预览中直接编辑，请使用 SQL 工作台");
         }
-        List<String> primaryKeys = new ArrayList<>();
-        try (var rs = metadata.getPrimaryKeys(adapter.metadataCatalog(object.schema()), adapter.metadataSchema(object.schema()), object.name())) {
-            while (rs.next()) primaryKeys.add(rs.getString("COLUMN_NAME"));
-        }
-        if (primaryKeys.isEmpty()) throw new RpcException("PRIMARY_KEY_REQUIRED", "该表没有主键，无法安全地直接编辑数据");
-        if (primaryKeys.stream().anyMatch(key -> key.equalsIgnoreCase(requestedColumn))) {
+        RowLocator locator = rowLocator(metadata, adapter, object, keyValues);
+        if (locator.primaryKey() && locator.columns().stream().anyMatch(key -> key.equalsIgnoreCase(requestedColumn))) {
             throw new RpcException("READ_ONLY_COLUMN", "主键列不能在数据预览中直接编辑");
         }
 
         String source = adapter.quoteIdentifier(object.schema()) + "." + adapter.quoteIdentifier(object.name());
-        String where = primaryKeys.stream().map(key -> adapter.quoteIdentifier(key) + " = ?")
-                .collect(java.util.stream.Collectors.joining(" AND "));
-        String sql = "UPDATE " + source + " SET " + adapter.quoteIdentifier(column) + " = ? WHERE " + where;
+        String sql = "UPDATE " + source + " SET " + adapter.quoteIdentifier(column) + " = ? WHERE " + locatorWhere(adapter, locator);
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             bindJsonValue(statement, 1, value);
-            for (int index = 0; index < primaryKeys.size(); index++) {
-                String key = primaryKeys.get(index);
-                JsonNode keyValue = keyValues.get(key);
-                if (keyValue == null) {
-                    keyValue = keyValues.properties().stream()
-                            .filter(entry -> entry.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue)
-                            .findFirst().orElse(null);
-                }
-                if (keyValue == null || keyValue.isNull()) {
-                    throw new RpcException("INVALID_REQUEST", "缺少主键列“" + key + "”的值");
-                }
-                bindJsonValue(statement, index + 2, keyValue);
-            }
+            bindLocator(statement, 2, locator);
             int updated = statement.executeUpdate();
-            if (updated != 1) throw new RpcException("UPDATE_CONFLICT", "未能精确更新一条记录，数据可能已被其他操作修改");
+            if (updated != 1) throw new RpcException("UPDATE_CONFLICT", rowCountConflict("更新", updated, locator));
             return updated;
         }
     }

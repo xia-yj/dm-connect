@@ -27,7 +27,7 @@ interface DataGridProps {
   table: ResultTable;
   rowOffset?: number;
   onEditCell?: (rowIndex: number, column: ColumnMetadata, value: string | null) => void;
-  isColumnEditable?: (column: ColumnMetadata) => boolean;
+  isColumnEditable?: (column: ColumnMetadata, rowIndex: number) => boolean;
   editedCellKeys?: Set<string>;
   onDeleteRow?: (rowIndex: number) => void;
   canDeleteRow?: (rowIndex: number) => boolean;
@@ -51,7 +51,7 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = 
   useEffect(() => {
     setInternalSelectedRows(new Set());
     setContextMenu(null);
-  }, [table]);
+  }, [table.rows]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -105,11 +105,18 @@ export function DataGrid({ table, rowOffset = 0, onEditCell, isColumnEditable = 
               return <tr key={rowIndex} className={rowClassName} aria-selected={isSelected} onClick={event => { toggleRow(rowIndex, event.metaKey || event.ctrlKey); setContextMenu(null); }} onContextMenu={event => { event.preventDefault(); toggleRow(rowIndex, activeSelectedRows.has(rowIndex) || event.metaKey || event.ctrlKey); setContextMenu({ x: event.clientX, y: event.clientY, rowIndex }); }}><td className="row-number">{rowOffset + rowIndex + 1}</td>{row.map((value, columnIndex) => {
               const isEditing = editing?.rowIndex === rowIndex && editing.columnIndex === columnIndex;
               const cellKey = `${rowIndex}:${columnIndex}`;
-              const editable = Boolean(onEditCell) && !isPendingDelete && isColumnEditable(table.columns[columnIndex]);
+              const editable = Boolean(onEditCell) && !isPendingDelete && isColumnEditable(table.columns[columnIndex], rowIndex);
               const fullText = value == null ? "NULL" : displayValue(value);
               const title = isPendingDelete ? "已标记删除，保存后生效" : (editable ? (fullText === "NULL" ? "双击编辑" : `双击编辑\n${fullText}`) : fullText);
-              return <td key={columnIndex} className={`${editable ? "editable-cell" : ""}${editedCellKeys.has(cellKey) ? " edited-cell" : ""}`} title={title} onClick={event => selectCell(event.currentTarget)} onDoubleClick={() => {
-                if (editable) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
+              return <td key={columnIndex} className={`${editable ? "editable-cell" : ""}${editedCellKeys.has(cellKey) ? " edited-cell" : ""}`} title={title} tabIndex={editable ? -1 : undefined} onClick={event => {
+                selectCell(event.currentTarget);
+                if (editable && isDraftRow && !isEditing) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
+              }} onDoubleClick={() => {
+                if (editable && !isEditing) setEditing({ rowIndex, columnIndex, value: editorValue(value) });
+              }} onKeyDown={event => {
+                if (!editable || isEditing || event.target !== event.currentTarget || event.metaKey || event.ctrlKey || event.altKey) return;
+                if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); setEditing({ rowIndex, columnIndex, value: editorValue(value) }); }
+                else if (event.key.length === 1) { event.preventDefault(); setEditing({ rowIndex, columnIndex, value: event.key }); }
               }}>
                 {isEditing
                   ? <input className="grid-cell-editor" autoFocus value={editing.value} onChange={event => setEditing({ ...editing, value: event.target.value })} onKeyDown={event => { if (event.key === "Enter") commitEdit(); if (event.key === "Escape") setEditing(null); }} onBlur={commitEdit} />

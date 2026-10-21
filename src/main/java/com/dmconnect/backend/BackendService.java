@@ -919,7 +919,8 @@ public final class BackendService implements AutoCloseable {
                     actualNames.put(key, name);
                     generated.put(key, "YES".equalsIgnoreCase(safeResultString(rs, "IS_GENERATEDCOLUMN")) || "YES".equalsIgnoreCase(safeResultString(rs, "IS_AUTOINCREMENT")));
                     nullable.put(key, rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls);
-                    defaults.put(key, safeResultString(rs, "COLUMN_DEF"));
+                    String columnDefault = safeResultString(rs, "COLUMN_DEF");
+                    defaults.put(key, columnDefault == null ? "" : columnDefault);
                 }
             }
         }

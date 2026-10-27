@@ -23,6 +23,7 @@ import com.dmconnect.query.InsertSqlExporter;
 import com.dmconnect.query.TableCsvExporter;
 import com.dmconnect.query.DangerousSqlDetector;
 import com.dmconnect.query.QuerySession;
+import com.dmconnect.query.ReadOnlySqlDetector;
 import com.dmconnect.query.SqlScriptParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,10 +64,18 @@ public final class BackendService implements AutoCloseable {
     private final Map<String, BackendQuery> queries = new ConcurrentHashMap<>();
     private final SqlScriptParser parser = new SqlScriptParser();
     private final DangerousSqlDetector dangerousSqlDetector = new DangerousSqlDetector();
+    private final ReadOnlySqlDetector readOnlySqlDetector = new ReadOnlySqlDetector();
+    private final boolean recordHistory;
 
     public BackendService(AppContext context, ObjectMapper mapper) {
+        this(context, mapper, true);
+    }
+
+    /** recordHistory 为 false 时不写 SQL 历史，供与桌面端共用 vault.json 的 MCP 进程使用，避免两个进程互相覆盖。 */
+    public BackendService(AppContext context, ObjectMapper mapper, boolean recordHistory) {
         this.context = context;
         this.mapper = mapper;
+        this.recordHistory = recordHistory;
     }
 
     public Object handle(String method, JsonNode params) throws Exception {
@@ -1132,6 +1141,10 @@ public final class BackendService implements AutoCloseable {
             default -> throw new RpcException("INVALID_ARGUMENT", "未知的 SQL 执行模式：" + mode);
         };
         if (statements.isEmpty()) throw new RpcException("NO_SQL", "没有可执行的 SQL");
+        if (params.path("readOnly").asBoolean(false)) {
+            List<String> writable = readOnlySqlDetector.findWritable(statements, query.databaseType());
+            if (!writable.isEmpty()) throw new RpcException("READ_ONLY_SQL", "只读模式只允许执行查询语句", writable);
+        }
         List<String> dangerous = dangerousSqlDetector.findDangerous(statements);
         if (!dangerous.isEmpty() && !params.path("allowDangerous").asBoolean(false)) {
             throw new RpcException("DANGEROUS_SQL", "检测到可能造成数据丢失或权限变更的 SQL", dangerous);
@@ -1139,12 +1152,14 @@ public final class BackendService implements AutoCloseable {
         int maxRows = QuerySession.clampResultRows(params.path("maxRows").asInt(QuerySession.DEFAULT_RESULT_ROWS));
         ExecutionResult execution = query.session().execute(statements, maxRows);
         String historyWarning = "";
-        try {
-            ConnectionProfile profile = requireProfile(query.profileId());
-            context.vault().addHistory(profile.id(), profile.name(), execution.success(), execution.durationMillis(),
-                    String.join(";\n\n", statements));
-        } catch (Exception exception) {
-            historyWarning = rootMessage(exception);
+        if (recordHistory) {
+            try {
+                ConnectionProfile profile = requireProfile(query.profileId());
+                context.vault().addHistory(profile.id(), profile.name(), execution.success(), execution.durationMillis(),
+                        String.join(";\n\n", statements));
+            } catch (Exception exception) {
+                historyWarning = rootMessage(exception);
+            }
         }
         query.clearResults();
         Map<String, Object> response = executionView(query, execution);

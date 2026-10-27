@@ -5,7 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-final class BackendErrorFormatter {
+public final class BackendErrorFormatter {
     private static final Pattern SECRET = Pattern.compile(
             "(?i)((?:[a-z0-9_.-]*(?:password|token|secret|credential|passphrase)[a-z0-9_.-]*|passwd|pwd|private[_-]?key|api[_-]?key)\\s*[=:]\\s*)[^\\s,;&]+"
     );
@@ -13,7 +13,7 @@ final class BackendErrorFormatter {
     private BackendErrorFormatter() {
     }
 
-    static String format(Throwable throwable) {
+    public static String format(Throwable throwable) {
         Set<String> messages = new LinkedHashSet<>();
         String sqlState = "";
         int vendorCode = 0;

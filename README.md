@@ -75,6 +75,21 @@ MySQL Connector/J 8.3 已随应用后端内置；达梦驱动仍需按服务器�
 
 macOS 和 Linux 把本机密钥保存在 `vault.key`（权限 600），Windows 使用当前用户 DPAPI（`vault.key.dpapi`）。2.0.22–2.0.25 曾在 macOS 上把密钥写入钥匙串（服务名 `com.dmconnect.vault`）；升级后若 `vault.key` 不存在，应用会把钥匙串中的密钥写回 `vault.key` 并删除该钥匙串条目，`vault.key` 已存在时不会读取或改动钥匙串。从使用主密码的旧版升级时，应用无法在不询问主密码的情况下解密旧数据，因此会将旧文件保留为 `vault.master-password-backup.json`，然后创建新的本机加密存储。连接配置会保留，已保存的数据库密码需要重新输入。
 
+## MCP 服务
+
+Java 后端另带一个 stdio MCP 入口（`com.dmconnect.mcp.McpLauncher`），让 Claude Code 等 AI 客户端直接使用桌面端保存的连接。它和桌面端共用 `profiles.json` 与本地加密存储，不写 SQL 历史。
+
+```bash
+./scripts/prepare-electron-backend.sh   # 首次或改了 Java 代码后构建
+claude mcp add --scope user dm-connect -- "$PWD/scripts/run-mcp.sh"
+```
+
+提供的工具：`list_connections`、`list_schemas`、`list_objects`、`describe_object`、`preview_table`、`execute_sql`、`mongo_list_collections`、`mongo_find`、`redis_scan`、`redis_get`。
+
+- 默认只读：`execute_sql` 只接受 `SELECT`/`WITH`/`SHOW`/`DESC`/`EXPLAIN`，语句里出现 `INSERT`、`UPDATE`、`DELETE`、`INTO`、`CALL` 等关键字（包括子查询里）都会被拒绝，查询在关闭自动提交的事务里执行，结束后回滚。
+- 允许写入：给 `run-mcp.sh` 传 `--allow-write`，或设置 `DMCONNECT_MCP_ALLOW_WRITE=true`。即使开了写入，`DROP`、`TRUNCATE`、`ALTER`、`GRANT`、`REVOKE` 和不带 `WHERE` 的 `DELETE`/`UPDATE` 也会被拒绝。
+- 只能用已在桌面端勾选“记住密码”的连接；MCP 不接收密码参数，避免密码出现在对话记录里。
+
 ## SQL 脚本规则
 
 普通语句使用分号分隔。DM 的过程、函数、触发器和匿名块使用独占一行的 `/` 结束：

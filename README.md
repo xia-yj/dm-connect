@@ -79,6 +79,17 @@ macOS 和 Linux 把本机密钥保存在 `vault.key`（权限 600），Windows �
 
 Java 后端另带一个 stdio MCP 入口（`com.dmconnect.mcp.McpLauncher`），让 Claude Code 等 AI 客户端直接使用桌面端保存的连接。它和桌面端共用 `profiles.json` 与本地加密存储，不写 SQL 历史。
 
+2.0.29 起安装包自带 MCP 入口，直接用已安装应用里的 Java Runtime 启动，不依赖源码目录：
+
+```bash
+BACKEND="/Applications/数据库连接工具.app/Contents/Resources/backend"
+claude mcp add --scope user dm-connect -- "$BACKEND/runtime/bin/java" \
+  -Dfile.encoding=UTF-8 -DsocksProxyHost= \
+  -cp "$BACKEND/app/dm-connect.jar:$BACKEND/app/lib/*" com.dmconnect.mcp.McpLauncher
+```
+
+应用自动更新后，在 Claude Code 里执行 `/mcp` 重新连接，才会用上新版后端。开发 MCP 本身时可改用源码构建：
+
 ```bash
 ./scripts/prepare-electron-backend.sh   # 首次或改了 Java 代码后构建
 claude mcp add --scope user dm-connect -- "$PWD/scripts/run-mcp.sh"

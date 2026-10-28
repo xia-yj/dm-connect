@@ -28,10 +28,10 @@ public final class McpServer implements AutoCloseable {
     static final String LATEST_PROTOCOL = "2025-06-18";
     private static final List<String> PROTOCOLS = List.of("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25");
     private static final String INSTRUCTIONS = """
-            读取“数据库连接工具”桌面端里已保存的数据库连接。先用 list_connections 查看连接，\
+            使用“数据库连接工具”桌面端里已保存的数据库连接。先用 list_connections 查看连接和当前权限级别，\
             connection 参数可以填连接名称或 ID。连接需要在桌面端勾选“记住密码”。\
             关系型数据库用 list_schemas → list_objects → describe_object 了解结构，再用 execute_sql 查询；\
-            MongoDB 用 mongo_* 工具，Redis 用 redis_* 工具。""";
+            MongoDB 用 mongo_* 工具，Redis 用 redis_* 工具。写入工具只在允许写入时提供。""";
 
     private final McpTools tools;
     private final ObjectMapper mapper;

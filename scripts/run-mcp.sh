@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 以 stdio 方式启动 MCP 服务，供 Claude Code 等客户端调用。
 # stdout 只能输出 MCP 协议消息，提示信息一律写 stderr。
-# 默认只读；传 --allow-write 或设置 DMCONNECT_MCP_ALLOW_WRITE=true 才允许写 SQL。
+# 默认只读；--allow-write（DMCONNECT_MCP_ALLOW_WRITE=true）允许写入，
+# --full-access（DMCONNECT_MCP_FULL_ACCESS=true）连危险 SQL 和 Redis 管理命令也放行。
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

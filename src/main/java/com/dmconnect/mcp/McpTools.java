@@ -7,6 +7,7 @@ import com.dmconnect.backend.RpcException;
 import com.dmconnect.model.ColumnMetadata;
 import com.dmconnect.model.DatabaseObject;
 import com.dmconnect.model.DatabaseObjectKind;
+import com.dmconnect.nativeclient.RedisCommandExecutor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
@@ -24,6 +25,13 @@ import java.util.Map;
  * 把 BackendService 的 RPC 包装成 MCP 工具。默认只读：SQL 只允许查询语句，并在只读事务里执行后回滚。
  */
 public final class McpTools {
+    /** 权限级别：写入模式拦截危险 SQL 和 Redis 管理命令，完全权限不拦截。 */
+    public enum Access {
+        READ_ONLY, WRITE, FULL;
+
+        boolean canWrite() { return this != READ_ONLY; }
+    }
+
     private static final int MAX_CELL_CHARS = 2_000;
     private static final List<String> OBJECT_KINDS = Arrays.stream(DatabaseObjectKind.values()).map(Enum::name).toList();
 
@@ -31,20 +39,22 @@ public final class McpTools {
     private final BackendService service;
     private final ObjectMapper mapper;
     private final ObjectWriter compactWriter;
+    private final Access access;
     private final boolean allowWrite;
 
-    public McpTools(AppContext context, BackendService service, ObjectMapper mapper, boolean allowWrite) {
+    public McpTools(AppContext context, BackendService service, ObjectMapper mapper, Access access) {
         this.context = context;
         this.service = service;
         this.mapper = mapper;
         this.compactWriter = mapper.writer().without(SerializationFeature.INDENT_OUTPUT);
-        this.allowWrite = allowWrite;
+        this.access = access;
+        this.allowWrite = access.canWrite();
     }
 
     List<Map<String, Object>> definitions() {
         Map<String, Object> connection = string("连接名称或连接 ID，见 list_connections");
         List<Map<String, Object>> tools = new ArrayList<>();
-        tools.add(tool("list_connections", "列出数据库连接工具里保存的全部连接（不含密码），以及当前是否只读模式。",
+        tools.add(tool("list_connections", "列出数据库连接工具里保存的全部连接（不含密码），以及当前权限级别。",
                 true, Map.of()));
         tools.add(tool("list_schemas", "连接数据库并列出模式/库。关系型数据库返回模式，MongoDB 返回数据库，Redis 返回当前逻辑库。",
                 true, Map.of("connection", connection), "connection"));
@@ -76,9 +86,11 @@ public final class McpTools {
                                                 "value", string("比较值")),
                                         "required", List.of("column", "value")))),
                 "connection", "schema", "name"));
-        tools.add(tool("execute_sql", allowWrite
-                        ? "执行 SQL（多条用分号分隔，自动提交）。DROP、TRUNCATE、ALTER、GRANT、REVOKE 和不带 WHERE 的 DELETE/UPDATE 会被拒绝，这类语句请在桌面端执行。"
-                        : "执行只读 SQL 查询（SELECT、WITH、SHOW、DESC、EXPLAIN），多条用分号分隔。当前为只读模式：写语句会被拒绝，查询在事务里执行后回滚。",
+        tools.add(tool("execute_sql", switch (access) {
+                    case FULL -> "执行任意 SQL（多条用分号分隔，自动提交）。当前为完全权限：DROP、TRUNCATE、不带 WHERE 的 DELETE/UPDATE 等也会直接执行，执行前请确认。";
+                    case WRITE -> "执行 SQL（多条用分号分隔，自动提交）。DROP、TRUNCATE、ALTER、GRANT、REVOKE 和不带 WHERE 的 DELETE/UPDATE 会被拒绝，这类语句请在桌面端执行。";
+                    case READ_ONLY -> "执行只读 SQL 查询（SELECT、WITH、SHOW、DESC、EXPLAIN），多条用分号分隔。当前为只读模式：写语句会被拒绝，查询在事务里执行后回滚。";
+                },
                 !allowWrite, props(
                         "connection", connection,
                         "sql", string("要执行的 SQL"),
@@ -106,7 +118,30 @@ public final class McpTools {
         tools.add(tool("redis_get", "读取 Redis 键的类型、TTL 和值（大值会截断）。",
                 true, props("connection", connection, "key", string("键名")),
                 "connection", "key"));
+        if (allowWrite) addWriteTools(tools, connection);
         return tools;
+    }
+
+    private void addWriteTools(List<Map<String, Object>> tools, Map<String, Object> connection) {
+        Map<String, Object> database = string("数据库名");
+        Map<String, Object> collection = string("集合名");
+        Map<String, Object> id = string("文档 _id：ObjectId 的 24 位十六进制字符串，或字符串/数字形式的 _id");
+        tools.add(tool("mongo_insert", "向 MongoDB 集合插入一个文档。",
+                false, props("connection", connection, "database", database, "collection", collection,
+                        "document", string("Extended JSON 格式的文档")),
+                "connection", "database", "collection", "document"));
+        tools.add(tool("mongo_replace", "按 _id 整体替换 MongoDB 文档。",
+                false, props("connection", connection, "database", database, "collection", collection, "id", id,
+                        "document", string("替换后的完整文档，Extended JSON 格式")),
+                "connection", "database", "collection", "id", "document"));
+        tools.add(tool("mongo_delete", "按 _id 删除一个 MongoDB 文档。",
+                false, props("connection", connection, "database", database, "collection", collection, "id", id),
+                "connection", "database", "collection", "id"));
+        tools.add(tool("redis_command", access == Access.FULL
+                        ? "执行一条 Redis 命令，如 SET k v、DEL k、HSET h f v，含 FLUSHDB、CONFIG 等管理命令。阻塞命令、KEYS 和改变会话的命令（SELECT、MULTI 等）仍不允许。"
+                        : "执行一条 Redis 命令，如 SET k v、DEL k、HSET h f v。FLUSHDB、FLUSHALL、CONFIG、EVAL 等管理命令需要完全权限；阻塞命令、KEYS 和改变会话的命令不允许。",
+                false, props("connection", connection, "command", string("完整命令，参数含空格时用引号包住")),
+                "connection", "command"));
     }
 
     Map<String, Object> call(JsonNode params) {
@@ -125,6 +160,10 @@ public final class McpTools {
                 case "mongo_find" -> mongoFind(arguments);
                 case "redis_scan" -> redisScan(arguments);
                 case "redis_get" -> service.handle("redis.key", connected(arguments).put("key", required(arguments, "key")));
+                case "mongo_insert" -> mongoWrite("mongo.insert", arguments, false);
+                case "mongo_replace" -> mongoWrite("mongo.replace", arguments, true);
+                case "mongo_delete" -> mongoWrite("mongo.delete", arguments, true);
+                case "redis_command" -> redisCommand(arguments);
                 default -> throw new McpServer.McpError(-32602, "未知工具：" + name);
             };
             return textResult(compactWriter.writeValueAsString(result), false);
@@ -151,7 +190,7 @@ public final class McpTools {
             }
             connections.add(view);
         }
-        return Map.of("readOnly", !allowWrite, "connections", connections);
+        return Map.of("readOnly", !allowWrite, "access", access.name(), "connections", connections);
     }
 
     private Object listSchemas(JsonNode arguments) throws Exception {
@@ -216,7 +255,8 @@ public final class McpTools {
                     .put("sql", sql)
                     .put("mode", "SCRIPT")
                     .put("maxRows", arguments.path("maxRows").asInt(100))
-                    .put("readOnly", !allowWrite));
+                    .put("readOnly", !allowWrite)
+                    .put("allowDangerous", access == Access.FULL));
             List<Map<String, Object>> results = new ArrayList<>();
             for (Object item : (List<?>) execution.get("outcomes")) {
                 Map<?, ?> outcome = (Map<?, ?>) item;
@@ -252,6 +292,36 @@ public final class McpTools {
                 .put("filter", arguments.path("filter").asText(""))
                 .put("page", Math.max(1, arguments.path("page").asInt(1)))
                 .put("pageSize", Math.max(1, Math.min(50, arguments.path("pageSize").asInt(20)))));
+    }
+
+    private Object mongoWrite(String method, JsonNode arguments, boolean byId) throws Exception {
+        requireWrite();
+        ObjectNode params = connected(arguments)
+                .put("database", required(arguments, "database"))
+                .put("collection", required(arguments, "collection"));
+        if (byId) params.put("id", required(arguments, "id"));
+        if (!"mongo.delete".equals(method)) params.put("document", required(arguments, "document"));
+        return service.handle(method, params);
+    }
+
+    private Object redisCommand(JsonNode arguments) throws Exception {
+        requireWrite();
+        String command = required(arguments, "command");
+        RedisCommandExecutor.ParsedCommand parsed;
+        try {
+            parsed = RedisCommandExecutor.parse(command);
+        } catch (IllegalArgumentException exception) {
+            throw new RpcException("INVALID_ARGUMENT", exception.getMessage());
+        }
+        // 写入模式只放行普通读写命令，FLUSHDB、CONFIG 这类管理命令要完全权限。
+        if (access != Access.FULL && parsed.risk() == RedisCommandExecutor.Risk.ADMIN) {
+            throw new RpcException("ACCESS_DENIED", parsed.operation() + " 是 Redis 管理命令，需要以完全权限启动 MCP（--full-access）");
+        }
+        return service.handle("redis.command", connected(arguments).put("command", command).put("confirmed", true));
+    }
+
+    private void requireWrite() {
+        if (!allowWrite) throw new RpcException("ACCESS_DENIED", "当前为只读模式，不允许写入");
     }
 
     private Object redisScan(JsonNode arguments) throws Exception {
@@ -360,7 +430,7 @@ public final class McpTools {
         tool.put("name", name);
         tool.put("description", description);
         tool.put("inputSchema", schema);
-        tool.put("annotations", Map.of("readOnlyHint", readOnly, "destructiveHint", false, "openWorldHint", false));
+        tool.put("annotations", Map.of("readOnlyHint", readOnly, "destructiveHint", !readOnly, "openWorldHint", false));
         return tool;
     }
 

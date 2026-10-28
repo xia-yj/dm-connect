@@ -95,10 +95,11 @@ claude mcp add --scope user dm-connect -- "$BACKEND/runtime/bin/java" \
 claude mcp add --scope user dm-connect -- "$PWD/scripts/run-mcp.sh"
 ```
 
-提供的工具：`list_connections`、`list_schemas`、`list_objects`、`describe_object`、`preview_table`、`execute_sql`、`mongo_list_collections`、`mongo_find`、`redis_scan`、`redis_get`。
+提供的工具：`list_connections`、`list_schemas`、`list_objects`、`describe_object`、`preview_table`、`execute_sql`、`mongo_list_collections`、`mongo_find`、`redis_scan`、`redis_get`。允许写入后还会提供 `mongo_insert`、`mongo_replace`、`mongo_delete`、`redis_command`。
 
 - 默认只读：`execute_sql` 只接受 `SELECT`/`WITH`/`SHOW`/`DESC`/`EXPLAIN`，语句里出现 `INSERT`、`UPDATE`、`DELETE`、`INTO`、`CALL` 等关键字（包括子查询里）都会被拒绝，查询在关闭自动提交的事务里执行，结束后回滚。
-- 允许写入：给 `run-mcp.sh` 传 `--allow-write`，或设置 `DMCONNECT_MCP_ALLOW_WRITE=true`。即使开了写入，`DROP`、`TRUNCATE`、`ALTER`、`GRANT`、`REVOKE` 和不带 `WHERE` 的 `DELETE`/`UPDATE` 也会被拒绝。
+- 允许写入：给 `run-mcp.sh` 传 `--allow-write`，或设置 `DMCONNECT_MCP_ALLOW_WRITE=true`。即使开了写入，`DROP`、`TRUNCATE`、`ALTER`、`GRANT`、`REVOKE` 和不带 `WHERE` 的 `DELETE`/`UPDATE` 也会被拒绝，Redis 的 `FLUSHDB`、`FLUSHALL`、`CONFIG`、`EVAL` 等管理命令也不允许。
+- 完全权限：传 `--full-access`，或设置 `DMCONNECT_MCP_FULL_ACCESS=true`。上面这些危险 SQL 和 Redis 管理命令都会直接执行，没有二次确认。阻塞命令、`KEYS` 和改变会话的 Redis 命令（`SELECT`、`MULTI` 等）仍不允许，因为它们会卡住或破坏 MCP 复用的连接。
 - 只能用已在桌面端勾选“记住密码”的连接；MCP 不接收密码参数，避免密码出现在对话记录里。
 
 ## SQL 脚本规则

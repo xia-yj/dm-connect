@@ -29,7 +29,7 @@ class McpServerTest {
 
     @Test
     void answersInitializeAndListsToolsOverStdio() throws Exception {
-        withServer(false, server -> {
+        withServer(McpTools.Access.READ_ONLY, server -> {
             JsonNode initialize = server.request("initialize", mapper.createObjectNode().put("protocolVersion", "2025-03-26"));
             assertThat(initialize.path("result").path("protocolVersion").asText()).isEqualTo("2025-03-26");
             assertThat(initialize.path("result").path("capabilities").has("tools")).isTrue();
@@ -37,6 +37,7 @@ class McpServerTest {
 
             JsonNode tools = server.request("tools/list", mapper.createObjectNode()).path("result").path("tools");
             assertThat(tools.findValuesAsText("name")).contains("list_connections", "describe_object", "execute_sql");
+            assertThat(tools.findValuesAsText("name")).doesNotContain("mongo_insert", "redis_command");
 
             JsonNode unknown = server.request("resources/list", mapper.createObjectNode());
             assertThat(unknown.path("error").path("code").asInt()).isEqualTo(-32601);
@@ -45,7 +46,7 @@ class McpServerTest {
 
     @Test
     void browsesAndQueriesSqliteReadOnly() throws Exception {
-        withServer(false, server -> {
+        withServer(McpTools.Access.READ_ONLY, server -> {
             JsonNode connections = server.callTool("list_connections", mapper.createObjectNode());
             assertThat(connections.path("readOnly").asBoolean()).isTrue();
             assertThat(connections.path("connections").get(0).path("name").asText()).isEqualTo("本地库");
@@ -73,7 +74,7 @@ class McpServerTest {
 
     @Test
     void writesOnlyWhenAllowedAndStillBlocksDangerousSql() throws Exception {
-        withServer(true, server -> {
+        withServer(McpTools.Access.WRITE, server -> {
             JsonNode inserted = server.callTool("execute_sql", args().put("sql", "INSERT INTO users(name) VALUES ('王五')"));
             assertThat(inserted.path("results").get(0).path("updateCount").asInt()).isEqualTo(1);
             assertThat(userCount()).isEqualTo(3);
@@ -85,8 +86,23 @@ class McpServerTest {
     }
 
     @Test
+    void fullAccessRunsDangerousSqlAndListsWriteTools() throws Exception {
+        withServer(McpTools.Access.FULL, server -> {
+            JsonNode tools = server.request("tools/list", mapper.createObjectNode()).path("result").path("tools");
+            assertThat(tools.findValuesAsText("name")).contains("mongo_insert", "mongo_replace", "mongo_delete", "redis_command");
+            assertThat(server.callTool("list_connections", mapper.createObjectNode()).path("access").asText()).isEqualTo("FULL");
+
+            server.callTool("execute_sql", args().put("sql", "DELETE FROM users"));
+            assertThat(userCount()).isZero();
+            server.callTool("execute_sql", args().put("sql", "DROP TABLE users"));
+            JsonNode missing = server.callToolRaw("execute_sql", args().put("sql", "SELECT COUNT(*) FROM users"));
+            assertThat(missing.path("content").get(0).path("text").asText()).contains("users");
+        });
+    }
+
+    @Test
     void reportsUnknownConnectionWithAvailableNames() throws Exception {
-        withServer(false, server -> {
+        withServer(McpTools.Access.READ_ONLY, server -> {
             JsonNode result = server.callToolRaw("list_schemas", mapper.createObjectNode().put("connection", "不存在"));
             assertThat(result.path("isError").asBoolean()).isTrue();
             assertThat(result.path("content").get(0).path("text").asText()).contains("找不到连接", "本地库");
@@ -109,7 +125,7 @@ class McpServerTest {
         }
     }
 
-    private void withServer(boolean allowWrite, ServerAction action) throws Exception {
+    private void withServer(McpTools.Access access, ServerAction action) throws Exception {
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database());
              var statement = connection.createStatement()) {
             statement.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
@@ -126,7 +142,7 @@ class McpServerTest {
                     .put("database", database().toString())
                     .put("driverId", "builtin:sqlite"));
             ByteArrayOutputStream output = new ByteArrayOutputStream();
-            try (McpServer server = new McpServer(new McpTools(context, service, mapper, allowWrite), mapper,
+            try (McpServer server = new McpServer(new McpTools(context, service, mapper, access), mapper,
                     new ByteArrayInputStream(new byte[0]), output)) {
                 action.run(new Client(server, output));
             }
